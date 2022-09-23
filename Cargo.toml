@@ -1,0 +1,15 @@
+[package]
+name = "avail"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+keyring = "1"
+oauth2 = "4.2.3"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+webbrowser = "0.8.0"
+serde = "1.0.144"
+dialoguer = "0.10.2"
