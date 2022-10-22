@@ -1,10 +1,12 @@
 mod oauth;
 
+use std::sync::Arc;
+
 use oauth::client::MicrosoftOauthClient;
 use dialoguer::{Input, MultiSelect};
 use chrono::{prelude::*, Duration};
 use itertools::Itertools;
-
+use tokio::sync::{Semaphore, TryAcquireError};
 
 use serde::Deserialize;
 use serde_json;
@@ -25,20 +27,20 @@ struct Event {
     name: String,
 
     #[serde(deserialize_with = "deserialize_json_time")]
-    start: DateTime<Utc>,
+    start: DateTime<Local>,
     #[serde(deserialize_with = "deserialize_json_time")]
-    end: DateTime<Utc>,
+    end: DateTime<Local>,
 
     #[serde(default)]
     selected: bool,
 }
 
 struct Availability {
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
 }
 
-fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Local>, D::Error>
 where
 	D: serde::de::Deserializer<'de>,
 {
@@ -47,12 +49,15 @@ where
     let tz_str = json.get("timeZone").expect("timeZone").as_str().unwrap();
 
     // 2022-10-22T20:30:00.0000000
-    let datetime = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S.%f").unwrap();
+    let naive_time = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S.%f").unwrap();
     
-    match tz_str {
-        "UTC" => Ok(DateTime::<Utc>::from_utc(datetime, Utc)),
-        _ =>  Ok(DateTime::<Utc>::from_utc(datetime, Utc)),
-    }
+    Local.timestamp(0, 0).offset();
+
+    let datetime = match tz_str {
+        "UTC" => DateTime::<Utc>::from_utc(naive_time, Utc),
+        _ =>  DateTime::<Utc>::from_utc(naive_time, Utc),
+    };
+    Ok(datetime.with_timezone(&Local))
 }
 
 impl std::fmt::Display for Event {
@@ -89,7 +94,7 @@ async fn get_calendars(token: String) -> Result<Vec<Calendar>, Box<dyn std::erro
     Ok(selected_calendars_idx.iter().map(|idx| calendars[*idx].clone()).collect())
 }
 
-async fn get_calendar_events(token: String, calendar: Calendar, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> Result<Vec<Event>, Box<dyn std::error::Error + Send + Sync>> {
+async fn get_calendar_events(token: String, calendar: Calendar, start_time: DateTime<Local>, end_time: DateTime<Local>) -> Result<Vec<Event>, Box<dyn std::error::Error + Send + Sync>> {
     let start_time_str = str::replace(&start_time.format("%+").to_string(), "+", "-");
     let end_time_str = str::replace(&end_time.format("%+").to_string(), "+", "-");
 
@@ -108,13 +113,13 @@ async fn get_calendar_events(token: String, calendar: Calendar, start_time: Date
     Ok(resp.value)
 }
 
-fn get_free_time(mut events: Vec<Event>, start: DateTime<Utc>, end: DateTime<Utc>, min: NaiveTime, max: NaiveTime) -> Vec<(Date<Utc>, Vec<Availability>)> {
-    let mut avail: Vec<(Date<Utc>, Vec<Availability>)> = vec![];
+fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<Local>, min: NaiveTime, max: NaiveTime) -> Vec<(Date<Local>, Vec<Availability>)> {
+    let mut avail: Vec<(Date<Local>, Vec<Availability>)> = vec![];
     let duration = 30;
 
     events.sort_by_key(|e| e.start);
     
-    let days = events.iter().group_by(|e| (e.start.date()));
+    let days = events.into_iter().group_by(|e| (e.start.date()));
 
     let mut iter = days.into_iter();
 
@@ -147,7 +152,7 @@ fn get_free_time(mut events: Vec<Event>, start: DateTime<Utc>, end: DateTime<Utc
                 if curr_time < start.time() {
                     // Meets requirement of minimum duration
                     if start.time() - curr_time >= Duration::minutes(duration) {
-                        let start_time = Utc::from_local_datetime(&Utc, &NaiveDateTime::new(start.date_naive(), curr_time)).unwrap();
+                        let start_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), curr_time), *Local.timestamp(0, 0).offset());
                         let end_time = start;
                         day_avail.push(Availability { start: start_time, end: end_time });
                     }
@@ -158,7 +163,17 @@ fn get_free_time(mut events: Vec<Event>, start: DateTime<Utc>, end: DateTime<Utc
                     curr_time = std::cmp::max(end.time(), curr_time);
                 }
             }
-            avail.push((dt.date(), day_avail))
+
+            if curr_time < max {
+                let start_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), curr_time), *Local.timestamp(0, 0).offset());
+                let end_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), max), *Local.timestamp(0, 0).offset());
+                day_avail.push(Availability { start: start_time, end: end_time });
+            }
+
+            avail.push((dt.date(), day_avail));
+
+            // 12AM next day
+            dt = (dt + Duration::days(1)).date().and_hms(0, 0, 0);
         } else {
             // Add days that are entirely free
             while dt <= end {
@@ -179,19 +194,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
     let token = client.get_authorization_code().await.secret().to_owned();
 
-    let start_time = Utc::now();
+    let start_time = Local::now();
     let end_time = start_time + Duration::days(7);
     let min = NaiveTime::from_hms(9, 0, 0);
     let max = NaiveTime::from_hms(17, 0, 0);
 
     let calendars = get_calendars(token.to_owned()).await?;
+    let semaphore = Arc::new(Semaphore::new(4));
 
     let mut tasks = vec![];
     for cal in calendars.into_iter() {
         let token = token.to_owned();
-
+        let permit = semaphore.clone().acquire_owned().await.expect("unable to acquire permit"); // Acquire a permit
         tasks.push(tokio::task::spawn(async move {
-            get_calendar_events(token.to_owned(), cal.clone(), start_time, end_time).await
+            let res = get_calendar_events(token.to_owned(), cal.clone(), start_time, end_time).await;
+            drop(permit);
+            res
         }));
     }
 
@@ -214,7 +232,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if a.end - a.start == Duration::days(1) {
                 println!("Whole day!");
             } else {
-                println!("{} to {}", a.start.format("%H:%M"), a.end.format("%H:%M"));
+                let duration = a.end  - a.start;
+                print!("{} to {}", a.start.format("%H:%M"), a.end.format("%H:%M"));
+
+                print!(" (");
+                if duration.num_hours() >= 1 {
+                    print!("{}h", duration.num_hours());
+                    if duration.num_minutes() >= 1 {
+                        print!("{}m", duration.num_minutes() % 60);
+                    }
+                } else if duration.num_minutes() >= 1 {
+                    print!("{}m", duration.num_minutes())
+                }
+                println!(")");
             }
         }
         println!()
