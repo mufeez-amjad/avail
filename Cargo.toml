@@ -6,10 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.66"
 keyring = "1"
+chrono = "0.4.22"
 oauth2 = "4.2.3"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
 webbrowser = "0.8.0"
 serde = "1.0.144"
+serde_json = "1.0.87"
 dialoguer = "0.10.2"
+futures = "0.3.25"
+itertools = "0.10.5"
