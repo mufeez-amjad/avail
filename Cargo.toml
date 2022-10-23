@@ -1,5 +1,6 @@
 [package]
 name = "avail"
+description = "A command-line tool to find available times on your calendars."
 version = "0.1.0"
 edition = "2021"
 
@@ -18,3 +19,5 @@ serde_json = "1.0.87"
 dialoguer = "0.10.2"
 futures = "0.3.25"
 itertools = "0.10.5"
+clap = { version = "4.0.18", features = ["derive"] }
+rusqlite = { version = "0.28.0", features = ["bundled"] }

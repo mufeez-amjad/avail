@@ -1,21 +1,87 @@
+extern crate keyring;
+
 mod oauth;
 
-use std::sync::Arc;
+use std::{sync::Arc, str::FromStr};
 
 use oauth::client::MicrosoftOauthClient;
-use dialoguer::{Input, MultiSelect};
+use dialoguer::{Select, MultiSelect, theme::ColorfulTheme, Confirm};
 use chrono::{prelude::*, Duration};
 use itertools::Itertools;
-use tokio::sync::{Semaphore, TryAcquireError};
+use tokio::sync::Semaphore;
 
 use serde::Deserialize;
 use serde_json;
+
+use clap::{Args, Parser, Subcommand};
+use rusqlite::{Connection, Result};
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    // #[arg(value_parser = parse_datetime)]
+    // start: DateTime<Local>,
+
+    #[arg(value_parser = parse_datetime)]
+    end: Option<DateTime<Local>>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
+    let dt_str: String = arg.to_string();
+    let non_local_d = NaiveDate::parse_from_str(&dt_str, "%b %d %Y");
+    let time = NaiveTime::from_hms(0, 0, 0);
+
+    if non_local_d.is_ok() {
+        let date = non_local_d.unwrap();
+        let datetime = NaiveDateTime::new(date, time);
+        Ok(Local.from_local_datetime(&datetime).unwrap())
+    } else {
+        Err(non_local_d.err().unwrap())
+    }
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Manages OAuth accounts (Microsoft Outlook and Google Calendar)
+    Account(Account),
+}
+
+#[derive(Args)]
+struct Account {
+    #[command(subcommand)]
+    command: AccountCommands,
+}
+
+#[derive(Subcommand)]
+enum AccountCommands {
+    /// Adds an OAuth account
+    add(AccountAdd),
+    /// Removes an OAuth account
+    remove(AccountRemove),
+}
+
+#[derive(Args)]
+struct AccountAdd {
+    /// The name of the account (should be unique)
+    alias: String,
+}
+
+#[derive(Args)]
+struct AccountRemove {
+    /// The name of the account to remove
+    alias: String,
+}
 
 #[derive(serde::Deserialize, Clone)]
 struct Calendar {
     id: String,
     name: String,
 
+    // TODO: use this field for default selection
     #[serde(default)]
     selected: bool,
 }
@@ -189,11 +255,13 @@ fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<L
     avail
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn get_authorization_code() -> String {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
     let token = client.get_authorization_code().await.secret().to_owned();
+    token
+}
 
+async fn get_availability(token: String) -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Local::now();
     let end_time = start_time + Duration::days(7);
     let min = NaiveTime::from_hms(9, 0, 0);
@@ -248,6 +316,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         println!()
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    let path = "./db.db3";
+    let db = Connection::open(path)?;
+
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS accounts (
+            id          INTEGER PRIMARY KEY,
+            name        TEXT NOT NULL,
+            platform    TEXT NOT NULL
+        );",
+        (),
+    )?;
+    
+    match &cli.command {
+        Some(Commands::Account(account_cmd)) => {
+            match &account_cmd.command {
+                AccountCommands::add(cmd) => {
+                    let selections = &[
+                        "Outlook",
+                        "GCal",
+                    ];
+
+                    let selection = Select::with_theme(&ColorfulTheme::default())
+                        .with_prompt("Which platform would you like to add an account for?")
+                        .items(&selections[..])
+                        .interact()
+                        .unwrap();
+
+                    let token = get_authorization_code().await;
+                    let entry = keyring::Entry::new("avail", &cmd.alias);
+                    entry.set_password(&token)?;
+
+                    db.execute(
+                        "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
+                        [cmd.alias.to_string(), selections[selection].to_string()],
+                    )?;
+                },
+                AccountCommands::remove(cmd) => {
+                    if Confirm::with_theme(&ColorfulTheme::default())
+                        .with_prompt(format!("Do you want to delete the account \"{}\"?", cmd.alias))
+                        .interact()
+                        .unwrap()
+                    {
+                        let service = "avail";
+                        let entry = keyring::Entry::new(&service, &cmd.alias);
+                        entry.delete_password()?;
+                        println!("Account removed.");
+                    }
+                }
+            }
+        },
+        _ => {
+            // get_availability(token);
+        },
     }
     
     Ok(())
