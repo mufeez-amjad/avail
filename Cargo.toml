@@ -1,6 +1,6 @@
 [package]
 name = "avail"
-description = "A command-line tool to find available times on your calendars."
+description = "A command-line tool to find available times between all your calendars."
 version = "0.1.0"
 edition = "2021"
 

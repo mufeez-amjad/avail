@@ -47,14 +47,18 @@ fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
 #[derive(Subcommand)]
 enum Commands {
     /// Manages OAuth accounts (Microsoft Outlook and Google Calendar)
-    Account(Account),
+    Account(AccountCmd),
+    Calendar(CalendarCmd),
 }
 
 #[derive(Args)]
-struct Account {
+struct AccountCmd {
     #[command(subcommand)]
     command: AccountCommands,
 }
+
+#[derive(Args)]
+struct CalendarCmd {}
 
 #[derive(Subcommand)]
 enum AccountCommands {
@@ -96,9 +100,6 @@ struct Event {
     start: DateTime<Local>,
     #[serde(deserialize_with = "deserialize_json_time")]
     end: DateTime<Local>,
-
-    #[serde(default)]
-    selected: bool,
 }
 
 struct Availability {
@@ -149,22 +150,14 @@ async fn get_calendars(token: String) -> Result<Vec<Calendar>, Box<dyn std::erro
         .await?;
 
     let calendars = resp.value;
-
-    let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect(); 
-    
-    let selected_calendars_idx : Vec<usize> = MultiSelect::new()
-    .items(&calendar_names)
-    .with_prompt("Select the calendars you want to use")
-    .interact()?;
-
-    Ok(selected_calendars_idx.iter().map(|idx| calendars[*idx].clone()).collect())
+    Ok(calendars)
 }
 
-async fn get_calendar_events(token: String, calendar: Calendar, start_time: DateTime<Local>, end_time: DateTime<Local>) -> Result<Vec<Event>, Box<dyn std::error::Error + Send + Sync>> {
+async fn get_calendar_events(token: String, calendar_id: String, start_time: DateTime<Local>, end_time: DateTime<Local>) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let start_time_str = str::replace(&start_time.format("%+").to_string(), "+", "-");
     let end_time_str = str::replace(&end_time.format("%+").to_string(), "+", "-");
 
-    let url = format!("https://graph.microsoft.com/v1.0/me/calendars/{}/calendarView?startDateTime={}&endDateTime={}", calendar.id, start_time_str, end_time_str);
+    let url = format!("https://graph.microsoft.com/v1.0/me/calendars/{}/calendarView?startDateTime={}&endDateTime={}", calendar_id, start_time_str, end_time_str);
 
     let resp: GraphResponse<Event> = reqwest::Client::new()
         .get(url)
@@ -261,40 +254,17 @@ async fn get_authorization_code() -> String {
     token
 }
 
-async fn get_availability(token: String) -> Result<(), Box<dyn std::error::Error>> {
+fn get_availability(events: Vec<Event>) -> Vec<(Date<Local>, Vec<Availability>)> {
     let start_time = Local::now();
     let end_time = start_time + Duration::days(7);
     let min = NaiveTime::from_hms(9, 0, 0);
     let max = NaiveTime::from_hms(17, 0, 0);
 
-    let calendars = get_calendars(token.to_owned()).await?;
-    let semaphore = Arc::new(Semaphore::new(4));
-
-    let mut tasks = vec![];
-    for cal in calendars.into_iter() {
-        let token = token.to_owned();
-        let permit = semaphore.clone().acquire_owned().await.expect("unable to acquire permit"); // Acquire a permit
-        tasks.push(tokio::task::spawn(async move {
-            let res = get_calendar_events(token.to_owned(), cal.clone(), start_time, end_time).await;
-            drop(permit);
-            res
-        }));
-    }
-
-    let results: Vec<Vec<Event>> = futures::future::join_all(tasks)
-    .await
-    .into_iter()
-    .filter_map(|r| r.ok())
-    .map(Result::unwrap)
-    .collect();
-
-    let events: Vec<Event> = results.into_iter().flatten().collect();
-    
     let avails = get_free_time(events, start_time, end_time, min, max);
 
     let margin = 20;
 
-    for (day, avail) in avails {
+    for (day, avail) in avails.iter() {
         println!("{:-^margin$}", day.format("%a %B %e"));
         for a in avail {
             if a.end - a.start == Duration::days(1) {
@@ -317,7 +287,7 @@ async fn get_availability(token: String) -> Result<(), Box<dyn std::error::Error
         }
         println!()
     }
-    Ok(())
+    avails
 }
 
 #[tokio::main]
@@ -331,7 +301,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             id          INTEGER PRIMARY KEY,
             name        TEXT NOT NULL,
             platform    TEXT NOT NULL
-        );",
+        )",
+        (),
+    )?;
+
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS calendars (
+            account_id  INTEGER NOT NULL,
+            calendar_id TEXT NOT NULL,
+            is_selected BOOLEAN,
+            FOREIGN KEY(account_id) REFERENCES accounts(id),
+            PRIMARY KEY (account_id, calendar_id)
+        )",
         (),
     )?;
     
@@ -369,12 +350,105 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let entry = keyring::Entry::new(&service, &cmd.alias);
                         entry.delete_password()?;
                         println!("Account removed.");
+
+                        //TODO: remove from database.
                     }
                 }
             }
         },
+        Some(Commands::Calendar(_)) => {
+            let mut stmt = db.prepare("SELECT id, name, platform FROM accounts")?;
+            let accounts = stmt.query_map([], |row| {
+                let id: u32 = row.get(0)?;
+                let name: String = row.get(1)?;
+                let platform: String = row.get(2)?;
+                Ok((id, name, platform))
+            })?;
+
+            for account in accounts {
+                match account {
+                    // Destructure the second and third elements
+                    Ok((id, name, platform)) => {
+                        let entry = keyring::Entry::new("avail", &name);
+                        let token = entry.get_password()?;
+
+                        if platform == "Outlook" {
+                            let mut calendars = get_calendars(token.to_owned()).await?;
+
+                            // Pull from database.
+                            let mut stmt = db.prepare("SELECT calendar_id FROM calendars where is_selected = true")?;
+                            let prev_selected_calendars: Vec<String> = stmt.query_map([], |row| {
+                                let id: String = row.get(0)?;
+                                Ok(id)
+                            })?.filter_map(|s| s.ok()).collect();
+
+                            let mut defaults = vec![];
+                            for cal in calendars.iter() {
+                                defaults.push(prev_selected_calendars.contains(&cal.id));
+                            }
+
+                            let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect();
+    
+                            let selected_calendars_idx : Vec<usize> = MultiSelect::new()
+                            .items(&calendar_names)
+                            .defaults(&defaults)
+                            .with_prompt("Select the calendars you want to use")
+                            .interact()?;
+
+                            for (i, mut cal) in calendars.iter_mut().enumerate() {
+                                cal.selected = selected_calendars_idx.contains(&i);
+                            }
+
+                            db.execute("DELETE FROM calendars where account_id = ?", [id])?;
+
+                            let mut stmt = db.prepare("INSERT INTO calendars (account_id, calendar_id, is_selected) VALUES (?, ?, ?)")?;
+                            for cal in calendars.into_iter() {
+                                stmt.execute((id, cal.id, cal.selected))?;
+                            }
+                        }
+                    },
+                    _ => println!("It doesn't matter what they are")
+                }
+            }
+        },
         _ => {
-            // get_availability(token);
+            let mut stmt = db.prepare("SELECT id, name, platform FROM accounts")?;
+            let accounts = stmt.query_map([], |row| {
+                let id: u32 = row.get(0)?;
+                let name: String = row.get(1)?;
+                let platform: String = row.get(2)?;
+                Ok((id, name, platform))
+            })?;
+
+            let mut events = vec![];
+
+            for account in accounts {
+                match account {
+                    Ok((id, name, platform)) => {
+                        let mut stmt = db.prepare("SELECT calendar_id FROM calendars where is_selected = true and account_id = ?")?;
+                        
+                        let selected_calendars: Vec<String> = stmt.query_map([id], |row| {
+                            let calendar_id: String = row.get(0)?;
+                            Ok(calendar_id)
+                        })?.filter_map(|s| s.ok()).collect();
+
+                        let entry = keyring::Entry::new("avail", &name);
+                        let token = entry.get_password()?;
+
+                        if platform == "Outlook" {
+                            for cal_id in selected_calendars {
+                                let start_time = Local::now();
+                                let end_time = start_time + Duration::days(7);
+                                let mut account_events = get_calendar_events(token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
+                                events.append(&mut account_events);
+                            }
+                        }
+                    },
+                    _ => println!("It doesn't matter what they are")
+                }
+            }
+
+            get_availability(events);
         },
     }
     
