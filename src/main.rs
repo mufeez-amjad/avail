@@ -2,14 +2,13 @@ extern crate keyring;
 
 mod oauth;
 
-use std::{sync::Arc, str::FromStr};
-
+use anyhow::anyhow;
 use oauth::client::MicrosoftOauthClient;
 use dialoguer::{Select, MultiSelect, theme::ColorfulTheme, Confirm};
 use chrono::{prelude::*, Duration};
 use itertools::Itertools;
-use tokio::sync::Semaphore;
 
+use oauth2::{StandardTokenResponse, EmptyExtraTokenFields, basic::BasicTokenType, TokenResponse};
 use serde::Deserialize;
 use serde_json;
 
@@ -20,10 +19,12 @@ use rusqlite::{Connection, Result};
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
-    // #[arg(value_parser = parse_datetime)]
-    // start: DateTime<Local>,
+    /// Start of search window (default now)
+    #[arg(short, long, value_parser = parse_datetime)]
+    start: Option<DateTime<Local>>,
 
-    #[arg(value_parser = parse_datetime)]
+    /// End of search window (default start + 7 days)
+    #[arg(short, long, value_parser = parse_datetime)]
     end: Option<DateTime<Local>>,
 
     #[command(subcommand)]
@@ -135,10 +136,18 @@ impl std::fmt::Display for Event {
 
 #[derive(serde::Deserialize)]
 struct GraphResponse<T> {
-    value: Vec<T>
+    value: Option<Vec<T>>,
+    error: Option<GraphError>
 }
 
-async fn get_calendars(token: String) -> Result<Vec<Calendar>, Box<dyn std::error::Error>> {
+// {"error":{"code":"InvalidAuthenticationToken","message":"CompactToken validation failed with reason code: 80049228.","innerError":{"date":"2022-10-23T22:59:31","request-id":"878f5037-d852-446f-8913-04fb1a0401d5","client-request-id":"878f5037-d852-446f-8913-04fb1a0401d5"}}}
+#[derive(serde::Deserialize)]
+struct GraphError {
+    code: String,
+    message: String,
+}
+
+async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>> {
     let resp: GraphResponse<Calendar> = reqwest::Client::new()
         .get("https://graph.microsoft.com/v1.0/me/calendars")
         .bearer_auth(token)
@@ -149,11 +158,14 @@ async fn get_calendars(token: String) -> Result<Vec<Calendar>, Box<dyn std::erro
         .json()
         .await?;
 
-    let calendars = resp.value;
-    Ok(calendars)
+    if let Some(err) = resp.error {
+        return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+    }
+
+    Ok(resp.value.unwrap())
 }
 
-async fn get_calendar_events(token: String, calendar_id: String, start_time: DateTime<Local>, end_time: DateTime<Local>) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
+async fn get_calendar_events(token: String, calendar_id: String, start_time: DateTime<Local>, end_time: DateTime<Local>) -> anyhow::Result<Vec<Event>> {
     let start_time_str = str::replace(&start_time.format("%+").to_string(), "+", "-");
     let end_time_str = str::replace(&end_time.format("%+").to_string(), "+", "-");
 
@@ -169,7 +181,11 @@ async fn get_calendar_events(token: String, calendar_id: String, start_time: Dat
         .json()
         .await?;
 
-    Ok(resp.value)
+    if let Some(err) = resp.error {
+        return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+    }
+
+    Ok(resp.value.unwrap())
 }
 
 fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<Local>, min: NaiveTime, max: NaiveTime) -> Vec<(Date<Local>, Vec<Availability>)> {
@@ -248,9 +264,16 @@ fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<L
     avail
 }
 
-async fn get_authorization_code() -> String {
+async fn get_authorization_code() -> (String, String) {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
-    let token = client.get_authorization_code().await.secret().to_owned();
+    let token = client.get_authorization_code().await;
+    token
+}
+
+async fn refresh_access_token(refresh_token: String) -> (String, String) {
+    let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
+    let token = client.refresh_access_token(refresh_token).await;
+    println!("refreshed token: {}, {}", token.0, token.1);
     token
 }
 
@@ -295,6 +318,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let path = "./db.db3";
     let db = Connection::open(path)?;
+    db.execute("PRAGMA foreign_keys = true", ())?;
 
     db.execute(
         "CREATE TABLE IF NOT EXISTS accounts (
@@ -310,8 +334,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             account_id  INTEGER NOT NULL,
             calendar_id TEXT NOT NULL,
             is_selected BOOLEAN,
-            FOREIGN KEY(account_id) REFERENCES accounts(id),
-            PRIMARY KEY (account_id, calendar_id)
+            PRIMARY KEY (account_id, calendar_id),
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
         )",
         (),
     )?;
@@ -331,14 +355,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .interact()
                         .unwrap();
 
-                    let token = get_authorization_code().await;
+                    let (_, refresh_token) = get_authorization_code().await;
                     let entry = keyring::Entry::new("avail", &cmd.alias);
-                    entry.set_password(&token)?;
-
+                    entry.set_password(&refresh_token)?;
                     db.execute(
                         "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
                         [cmd.alias.to_string(), selections[selection].to_string()],
                     )?;
+
+                    println!("Successfully added account.");
                 },
                 AccountCommands::remove(cmd) => {
                     if Confirm::with_theme(&ColorfulTheme::default())
@@ -349,9 +374,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let service = "avail";
                         let entry = keyring::Entry::new(&service, &cmd.alias);
                         entry.delete_password()?;
-                        println!("Account removed.");
+                        println!("Successfully removed account.");
 
-                        //TODO: remove from database.
+                        //TODO: Verify cascade delete.
+                        db.execute(
+                            "DELETE FROM accounts where name = ?",
+                            [cmd.alias.to_string()],
+                        )?;
                     }
                 }
             }
@@ -370,10 +399,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Destructure the second and third elements
                     Ok((id, name, platform)) => {
                         let entry = keyring::Entry::new("avail", &name);
-                        let token = entry.get_password()?;
+                        let refresh_token = entry.get_password()?;
+
+                        let (access_token, _) = refresh_access_token(refresh_token).await;
 
                         if platform == "Outlook" {
-                            let mut calendars = get_calendars(token.to_owned()).await?;
+                            let mut calendars = get_calendars(access_token.to_owned()).await?;
 
                             // Pull from database.
                             let mut stmt = db.prepare("SELECT calendar_id FROM calendars where is_selected = true")?;
@@ -389,10 +420,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect();
     
-                            let selected_calendars_idx : Vec<usize> = MultiSelect::new()
+                            let selected_calendars_idx : Vec<usize> = MultiSelect::with_theme(&ColorfulTheme::default()) 
                             .items(&calendar_names)
                             .defaults(&defaults)
-                            .with_prompt("Select the calendars you want to use")
+                            .with_prompt(format!("Select the calendars you want to use for {}", name))
                             .interact()?;
 
                             for (i, mut cal) in calendars.iter_mut().enumerate() {
@@ -433,13 +464,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })?.filter_map(|s| s.ok()).collect();
 
                         let entry = keyring::Entry::new("avail", &name);
-                        let token = entry.get_password()?;
+                        let refresh_token = entry.get_password()?;
+
+                        let (access_token, _) = refresh_access_token(refresh_token).await;
 
                         if platform == "Outlook" {
                             for cal_id in selected_calendars {
                                 let start_time = Local::now();
                                 let end_time = start_time + Duration::days(7);
-                                let mut account_events = get_calendar_events(token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
+                                let mut account_events = get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
                                 events.append(&mut account_events);
                             }
                         }

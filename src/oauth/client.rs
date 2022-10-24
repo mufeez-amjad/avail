@@ -57,15 +57,23 @@ impl MicrosoftOauthClient {
         Self { inner: client }
     }
 
-    pub async fn get_authorization_code(&self) -> oauth2::AccessToken {
+    pub async fn refresh_access_token(&self, refresh_token: String) -> (String, String) {
+        let token = self.inner.exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
+            .request_async(async_http_client)
+            .await;
+        
+        let inner = token.unwrap();
+
+        (inner.access_token().secret().to_owned(), inner.refresh_token().unwrap().secret().to_owned())
+    } 
+
+    pub async fn get_authorization_code(&self) -> (String, String) {
         let (authorize_url, csrf_state, pkce_code_verifier) = self
             .inner
-            .get_authorization_url(vec!["https://graph.microsoft.com/Calendars.Read", "https://graph.microsoft.com/User.Read"]); // "https://graph.microsoft.com/Calendars.Write", "https://graph.microsoft.com/User.Read"
-
-        println!("{}", authorize_url);
+            .get_authorization_url(vec!["https://graph.microsoft.com/Calendars.Read", "https://graph.microsoft.com/User.Read", "offline_access"]); // "https://graph.microsoft.com/Calendars.Write", "https://graph.microsoft.com/User.Read"
 
         webbrowser::open(authorize_url.as_str()).expect("failed to open web browser");
-
+        
         let mut token = None;
 
         // A very naive implementation of the redirect server.
@@ -133,14 +141,17 @@ impl MicrosoftOauthClient {
                     .request_async(async_http_client)
                     .await;
 
-                token = Some(token_result.unwrap().access_token().clone());
+                token = Some(token_result.unwrap());
 
                 // The server will terminate itself after collecting the first code.
                 break;
             }
         }
 
-        return token.unwrap();
+        let inner = token.unwrap();
+        let access_token = inner.access_token().secret().to_owned();
+        let refresh_token = inner.refresh_token().unwrap().secret().to_owned();
+        (access_token, refresh_token)
     }
 }
 
