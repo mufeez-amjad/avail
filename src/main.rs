@@ -1,19 +1,17 @@
-extern crate keyring;
-
 mod oauth;
+mod store;
 
-use anyhow::anyhow;
-use oauth::client::MicrosoftOauthClient;
 use dialoguer::{Select, MultiSelect, theme::ColorfulTheme, Confirm};
 use chrono::{prelude::*, Duration};
 use itertools::Itertools;
 
-use oauth2::{StandardTokenResponse, EmptyExtraTokenFields, basic::BasicTokenType, TokenResponse};
 use serde::Deserialize;
 use serde_json;
 
 use clap::{Args, Parser, Subcommand};
 use rusqlite::{Connection, Result};
+
+use oauth::client::MicrosoftOauthClient;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -316,29 +314,7 @@ fn get_availability(events: Vec<Event>) -> Vec<(Date<Local>, Vec<Availability>)>
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let path = "./db.db3";
-    let db = Connection::open(path)?;
-    db.execute("PRAGMA foreign_keys = true", ())?;
-
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS accounts (
-            id          INTEGER PRIMARY KEY,
-            name        TEXT NOT NULL,
-            platform    TEXT NOT NULL
-        )",
-        (),
-    )?;
-
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS calendars (
-            account_id  INTEGER NOT NULL,
-            calendar_id TEXT NOT NULL,
-            is_selected BOOLEAN,
-            PRIMARY KEY (account_id, calendar_id),
-            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
-        )",
-        (),
-    )?;
+    let db = store::Store::new("./db.db3");
     
     match &cli.command {
         Some(Commands::Account(account_cmd)) => {
@@ -356,12 +332,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .unwrap();
 
                     let (_, refresh_token) = get_authorization_code().await;
-                    let entry = keyring::Entry::new("avail", &cmd.alias);
-                    entry.set_password(&refresh_token)?;
-                    db.execute(
-                        "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
-                        [cmd.alias.to_string(), selections[selection].to_string()],
-                    )?;
+                    store::store_token(&cmd.alias, &refresh_token)?;
+                    db.add_account(&cmd.alias, selections[selection])?;
 
                     println!("Successfully added account.");
                 },
@@ -371,16 +343,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .interact()
                         .unwrap()
                     {
-                        let service = "avail";
-                        let entry = keyring::Entry::new(&service, &cmd.alias);
-                        entry.delete_password()?;
+                        store::delete_token(&cmd.alias)?;
+                        db.remove_account(&cmd.alias);
+                        
                         println!("Successfully removed account.");
-
-                        //TODO: Verify cascade delete.
-                        db.execute(
-                            "DELETE FROM accounts where name = ?",
-                            [cmd.alias.to_string()],
-                        )?;
                     }
                 }
             }
