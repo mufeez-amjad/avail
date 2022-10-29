@@ -1,8 +1,8 @@
-pub mod microsoft;
 pub mod google;
+pub mod microsoft;
 
-use chrono::prelude::*;
 use async_trait::async_trait;
+use chrono::prelude::*;
 
 pub struct Calendar {
     pub id: String,
@@ -20,5 +20,10 @@ pub struct Event {
 #[async_trait]
 pub trait GetResources {
     async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>>;
-    async fn get_calendar_events(token: String, calendar_id: String, start_time: DateTime<Local>, end_time: DateTime<Local>) -> anyhow::Result<Vec<Event>>;
+    async fn get_calendar_events(
+        token: String,
+        calendar_id: String,
+        start_time: DateTime<Local>,
+        end_time: DateTime<Local>,
+    ) -> anyhow::Result<Vec<Event>>;
 }

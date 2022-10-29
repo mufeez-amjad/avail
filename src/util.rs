@@ -8,12 +8,18 @@ pub struct Availability {
     end: DateTime<Local>,
 }
 
-pub fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<Local>, min: NaiveTime, max: NaiveTime) -> Vec<(Date<Local>, Vec<Availability>)> {
+pub fn get_free_time(
+    mut events: Vec<Event>,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
+    min: NaiveTime,
+    max: NaiveTime,
+) -> Vec<(Date<Local>, Vec<Availability>)> {
     let mut avail: Vec<(Date<Local>, Vec<Availability>)> = vec![];
     let duration = 30;
 
     events.sort_by_key(|e| e.start);
-    
+
     let days = events.into_iter().group_by(|e| (e.start.date()));
 
     let mut iter = days.into_iter();
@@ -31,9 +37,9 @@ pub fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTi
 
                 dt += Duration::days(1);
             }
-            
+
             // events is guaranteed to be non-empty because of the GroupBy
-            
+
             // Check for availabilities within the day
 
             let mut day_avail = vec![];
@@ -47,9 +53,15 @@ pub fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTi
                 if curr_time < start.time() {
                     // Meets requirement of minimum duration
                     if start.time() - curr_time >= Duration::minutes(duration) {
-                        let start_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), curr_time), *Local.timestamp(0, 0).offset());
+                        let start_time = DateTime::from_local(
+                            NaiveDateTime::new(start.date_naive(), curr_time),
+                            *Local.timestamp(0, 0).offset(),
+                        );
                         let end_time = start;
-                        day_avail.push(Availability { start: start_time, end: end_time });
+                        day_avail.push(Availability {
+                            start: start_time,
+                            end: end_time,
+                        });
                     }
 
                     // Not available until end of this event
@@ -60,9 +72,18 @@ pub fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTi
             }
 
             if curr_time < max {
-                let start_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), curr_time), *Local.timestamp(0, 0).offset());
-                let end_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), max), *Local.timestamp(0, 0).offset());
-                day_avail.push(Availability { start: start_time, end: end_time });
+                let start_time = DateTime::from_local(
+                    NaiveDateTime::new(start.date_naive(), curr_time),
+                    *Local.timestamp(0, 0).offset(),
+                );
+                let end_time = DateTime::from_local(
+                    NaiveDateTime::new(start.date_naive(), max),
+                    *Local.timestamp(0, 0).offset(),
+                );
+                day_avail.push(Availability {
+                    start: start_time,
+                    end: end_time,
+                });
             }
 
             avail.push((dt.date(), day_avail));

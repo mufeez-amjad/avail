@@ -1,19 +1,19 @@
-use rusqlite::{Connection};
+use rusqlite::Connection;
 
 pub struct Store {
-    connection: Connection, 
+    connection: Connection,
 }
 
 enum Platform {
     Microsoft,
-    Google, 
+    Google,
 }
 
 impl Platform {
     fn as_str(&self) -> &'static str {
         match self {
             Platform::Microsoft => "Microsoft Outlook",
-            Platform::Google => "Google Calendar"
+            Platform::Google => "Google Calendar",
         }
     }
 }
@@ -33,23 +33,29 @@ pub struct Account {
 impl Model<Account> for Account {
     fn get(conn: &Connection) -> anyhow::Result<Vec<Account>> {
         let mut stmt = conn.prepare("SELECT id, name, platform FROM accounts")?;
-        let accounts: Vec<Account> = stmt.query_map([], |row| {
-            let id: u32 = row.get(0)?;
-            let name: String = row.get(1)?;
-            let platform: String = row.get(2)?;
-            Ok(Account {
-                id: Some(id),
-                name,
-                platform: Some(platform)
-            })
-        })?.filter_map(|s| s.ok()).collect();
+        let accounts: Vec<Account> = stmt
+            .query_map([], |row| {
+                let id: u32 = row.get(0)?;
+                let name: String = row.get(1)?;
+                let platform: String = row.get(2)?;
+                Ok(Account {
+                    id: Some(id),
+                    name,
+                    platform: Some(platform),
+                })
+            })?
+            .filter_map(|s| s.ok())
+            .collect();
         Ok(accounts)
     }
 
     fn insert(&self, conn: &Connection) -> anyhow::Result<()> {
         conn.execute(
             "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
-            [self.name.to_owned(), self.platform.as_ref().unwrap().to_owned()],
+            [
+                self.name.to_owned(),
+                self.platform.as_ref().unwrap().to_owned(),
+            ],
         )?;
         Ok(())
     }
@@ -88,23 +94,34 @@ impl CalendarModel {
     pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
         let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, calendar_name, is_selected) VALUES (?, ?, ?, ?)")?;
         for cal in calendars.into_iter() {
-            stmt.execute((cal.account_id.unwrap(), cal.calendar_id, cal.calendar_name, cal.is_selected))?;
+            stmt.execute((
+                cal.account_id.unwrap(),
+                cal.calendar_id,
+                cal.calendar_name,
+                cal.is_selected,
+            ))?;
         }
         Ok(())
     }
-    
-    pub fn get_all_selected(conn: &Connection, account_id: &u32) -> anyhow::Result<Vec<CalendarModel>> {
+
+    pub fn get_all_selected(
+        conn: &Connection,
+        account_id: &u32,
+    ) -> anyhow::Result<Vec<CalendarModel>> {
         let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where is_selected = true and account_id = ?")?;
-        let prev_selected_calendars: Vec<CalendarModel> = stmt.query_map([account_id], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            Ok(CalendarModel {
-                account_id: None,
-                calendar_id: id,
-                calendar_name: name,
-                is_selected: true,
-            })
-        })?.filter_map(|s| s.ok()).collect();
+        let prev_selected_calendars: Vec<CalendarModel> = stmt
+            .query_map([account_id], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                Ok(CalendarModel {
+                    account_id: None,
+                    calendar_id: id,
+                    calendar_name: name,
+                    is_selected: true,
+                })
+            })?
+            .filter_map(|s| s.ok())
+            .collect();
 
         Ok(prev_selected_calendars)
     }
@@ -118,7 +135,8 @@ impl CalendarModel {
 impl Store {
     pub fn new(path: &str) -> Self {
         let conn = Connection::open(path).expect("failed to open database");
-        conn.execute("PRAGMA foreign_keys = true", ()).expect("failed to enable foreign keys");
+        conn.execute("PRAGMA foreign_keys = true", ())
+            .expect("failed to enable foreign keys");
         conn.execute(
             "
                 CREATE TABLE IF NOT EXISTS accounts (
@@ -128,7 +146,8 @@ impl Store {
                 );
             ",
             (),
-        ).expect("failed to create accounts table");
+        )
+        .expect("failed to create accounts table");
         conn.execute(
             "
                 CREATE TABLE IF NOT EXISTS calendars (
@@ -141,11 +160,10 @@ impl Store {
                 );
             ",
             (),
-        ).expect("failed to create calendars table");
+        )
+        .expect("failed to create calendars table");
 
-        Self {
-            connection: conn,
-        }
+        Self { connection: conn }
     }
 
     pub fn execute<T>(&self, func: Box<dyn FnOnce(&Connection) -> T>) -> anyhow::Result<T> {

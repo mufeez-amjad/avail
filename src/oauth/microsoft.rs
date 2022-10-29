@@ -19,8 +19,13 @@ pub struct MicrosoftOauthClient {
 
 impl MicrosoftOauthClient {
     pub fn new(client_id: &str, client_secret: &str, _auth_url: &str, _token_url: &str) -> Self {
-        let auth_url = AuthUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string()).expect("Invalid authorization endpoint URL");
-        let token_url = TokenUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string()).expect("Invalid token endpoint URL");
+        let auth_url = AuthUrl::new(
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
+        )
+        .expect("Invalid authorization endpoint URL");
+        let token_url =
+            TokenUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string())
+                .expect("Invalid token endpoint URL");
 
         let client = BasicClient::new(
             ClientId::new(client_id.to_string()),
@@ -30,30 +35,39 @@ impl MicrosoftOauthClient {
         )
         .set_auth_type(AuthType::RequestBody)
         .set_redirect_uri(
-            RedirectUrl::new("http://localhost:3003/redirect".to_string()).expect("Invalid redirect URL"),
+            RedirectUrl::new("http://localhost:3003/redirect".to_string())
+                .expect("Invalid redirect URL"),
         );
-        
+
         Self { inner: client }
     }
 
     pub async fn refresh_access_token(&self, refresh_token: String) -> (String, String) {
-        let token = self.inner.exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
+        let token = self
+            .inner
+            .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
             .request_async(async_http_client)
             .await;
-        
+
         let inner = token.unwrap();
 
-        (inner.access_token().secret().to_owned(), inner.refresh_token().unwrap().secret().to_owned())
-    } 
+        (
+            inner.access_token().secret().to_owned(),
+            inner.refresh_token().unwrap().secret().to_owned(),
+        )
+    }
 
     pub async fn get_authorization_code(&self) -> (String, String) {
-        let (authorize_url, csrf_state, pkce_code_verifier) = self
-            .inner
-            .get_authorization_url(vec!["https://graph.microsoft.com/Calendars.Read", "https://graph.microsoft.com/User.Read", "offline_access"]); // "https://graph.microsoft.com/Calendars.Write", "https://graph.microsoft.com/User.Read"
+        let (authorize_url, csrf_state, pkce_code_verifier) =
+            self.inner.get_authorization_url(vec![
+                "https://graph.microsoft.com/Calendars.Read",
+                "https://graph.microsoft.com/User.Read",
+                "offline_access",
+            ]); // "https://graph.microsoft.com/Calendars.Write", "https://graph.microsoft.com/User.Read"
 
         println!("Opening: {}", authorize_url.to_string());
         webbrowser::open(authorize_url.as_str()).expect("failed to open web browser");
-        
+
         let mut token = None;
 
         // A very naive implementation of the redirect server.
@@ -72,13 +86,11 @@ impl MicrosoftOauthClient {
                     let url = Url::parse(&("http://localhost".to_string() + redirect_url)).unwrap();
                     println!("{}", url.to_string());
 
-                    let code_pair = url
-                        .query_pairs()
-                        .find(|pair| {
-                            let &(ref key, _) = pair;
-                            key == "code"
-                        });
-                    
+                    let code_pair = url.query_pairs().find(|pair| {
+                        let &(ref key, _) = pair;
+                        key == "code"
+                    });
+
                     if code_pair.is_none() {
                         break;
                     }
@@ -118,7 +130,8 @@ impl MicrosoftOauthClient {
                 );
 
                 // Exchange the code with a token.
-                let token_result = self.inner
+                let token_result = self
+                    .inner
                     .exchange_code(code)
                     // Send the PKCE code verifier in the token request
                     .set_pkce_verifier(pkce_code_verifier)
@@ -138,4 +151,3 @@ impl MicrosoftOauthClient {
         (access_token, refresh_token)
     }
 }
-
