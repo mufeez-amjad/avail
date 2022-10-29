@@ -123,7 +123,7 @@ impl Store {
             "
                 CREATE TABLE IF NOT EXISTS accounts (
                     id          INTEGER PRIMARY KEY,
-                    name        TEXT NOT NULL,
+                    name        TEXT NOT NULL UNIQUE,
                     platform    TEXT NOT NULL
                 );
             ",

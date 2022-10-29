@@ -3,22 +3,20 @@ use chrono::prelude::*;
 use serde::Deserialize;
 use serde_json;
 
-use crate::oauth::microsoft::MicrosoftOauthClient;
+use crate::oauth::{microsoft::MicrosoftOauthClient, google::GoogleOauthClient};
 use super::{Calendar, Event, GetResources};
 
 #[derive(serde::Deserialize, Clone)]
-struct GraphCalendar {
+struct GoogleCalendar {
     id: String,
+    #[serde(rename(deserialize = "summary"))]
     name: String,
-
-    #[serde(default)]
-    selected: bool,
 }
 
 #[derive(serde::Deserialize, Clone)]
-struct GraphEvent {
+struct GoogleEvent {
     id: String,
-    #[serde(rename(deserialize = "subject"))]
+    #[serde(rename(deserialize = "summary"))]
     name: String,
 
     #[serde(deserialize_with = "deserialize_json_time")]
@@ -48,36 +46,36 @@ where
 }
 
 #[derive(serde::Deserialize)]
-struct GraphResponse<T> {
-    value: Option<Vec<T>>,
-    error: Option<GraphError>
+struct GoogleResponse<T> {
+    items: Option<Vec<T>>,
+    error: Option<GoogleError>
 }
 
 #[derive(serde::Deserialize)]
-struct GraphError {
+struct GoogleError {
     code: String,
     message: String,
 }
 
 pub async fn get_authorization_code() -> (String, String) {
-    let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
+    let client = GoogleOauthClient::new("174899155202-ijgr4acsm2til0nhcac2lhq9c2dh1ie8.apps.googleusercontent.com", "", "", "");
     let token = client.get_authorization_code().await;
     token
 }
 
-pub async fn refresh_access_token(refresh_token: String) -> (String, String) {
-    let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
+pub async fn refresh_access_token(refresh_token: String) -> String {
+    let client = GoogleOauthClient::new("174899155202-ijgr4acsm2til0nhcac2lhq9c2dh1ie8.apps.googleusercontent.com", "", "", "");
     let token = client.refresh_access_token(refresh_token).await;
     token
 }
 
-pub struct MicrosoftGraph { }
+pub struct GoogleAPI { }
 
 #[async_trait]
-impl GetResources for MicrosoftGraph {
+impl GetResources for GoogleAPI {
     async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>> {
-        let resp: GraphResponse<GraphCalendar> = reqwest::Client::new()
-        .get("https://graph.microsoft.com/v1.0/me/calendars")
+        let resp: GoogleResponse<GoogleCalendar> = reqwest::Client::new()
+        .get("https://www.googleapis.com/calendar/v3/users/me/calendarList")
         .bearer_auth(token)
         .header("Content-Type", "application/json")
         .send()
@@ -90,7 +88,7 @@ impl GetResources for MicrosoftGraph {
             return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
         }
 
-        let calendars = resp.value.unwrap().into_iter().map(|c| Calendar { id: c.id, name: c.name, selected: false }).collect();
+        let calendars = resp.items.unwrap().into_iter().map(|c| Calendar { id: c.id, name: c.name, selected: false }).collect();
         Ok(calendars)
     }
 
@@ -98,24 +96,26 @@ impl GetResources for MicrosoftGraph {
         let start_time_str = str::replace(&start_time.format("%+").to_string(), "+", "-");
         let end_time_str = str::replace(&end_time.format("%+").to_string(), "+", "-");
 
-        let url = format!("https://graph.microsoft.com/v1.0/me/calendars/{}/calendarView?startDateTime={}&endDateTime={}", calendar_id, start_time_str, end_time_str);
+        let url = format!("https://www.googleapis.com/calendar/v3/calendars/{}/events?singleEvents=true&orderBy=startTime&timeMin={}&timeMax={},", calendar_id, start_time_str, end_time_str);
 
-        let resp: GraphResponse<GraphEvent> = reqwest::Client::new()
+        let resp: String = reqwest::Client::new()
             .get(url)
             .bearer_auth(token)
             .header("Content-Type", "application/json")
             .send()
             .await
             .unwrap()
-            .json()
+            .text()
             .await?;
 
-        if let Some(err) = resp.error {
-            return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
-        }
-        
-        let events = resp.value.unwrap().into_iter().map(|e| Event { id: e.id, name: e.name, start: e.start, end: e.end }).collect();
+        println!("{}", resp);
 
-        Ok(events)
+        // if let Some(err) = resp.error {
+        //     return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+        // }
+        
+        // let events = resp.items.unwrap().into_iter().map(|e| Event { id: e.id, name: e.name, start: e.start, end: e.end }).collect();
+
+        Ok(vec![])
     }
 }

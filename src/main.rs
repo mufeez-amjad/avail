@@ -12,7 +12,7 @@ use rusqlite::{Result};
 
 use store::{Account, Model, CalendarModel};
 use util::{get_availability};
-use events::{microsoft::{get_authorization_code, refresh_access_token, MicrosoftGraph}, GetResources};
+use events::{microsoft, google, GetResources};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -116,9 +116,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .items(&selections[..])
                         .interact()
                         .unwrap();
-
-                    let (_, refresh_token) = get_authorization_code().await;
-                    store::store_token(&cmd.alias, &refresh_token)?;
+                    
+                    if selection == 0 {
+                        let (_, refresh_token) = microsoft::get_authorization_code().await;
+                        store::store_token(&cmd.alias, &refresh_token)?;
+                    } else if selection == 1 {
+                        let (_, refresh_token) = google::get_authorization_code().await;
+                        store::store_token(&cmd.alias, &refresh_token)?;
+                    }
+                    
                     let account = Account {name: cmd.alias.to_owned(), platform: Some(selections[selection].to_owned()), id: None };
                     db.execute(Box::new(move |conn| account.insert(conn)))??;
                     println!("Successfully added account.");
@@ -154,40 +160,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for account in accounts {
                 let refresh_token = store::get_token(&account.name)?;
 
-                let (access_token, _) = refresh_access_token(refresh_token).await;
-
+                
                 let account_id = account.id.unwrap().to_owned();
-                if account.platform.unwrap() == "Outlook" {
-                    let mut calendars = MicrosoftGraph::get_calendars(access_token.to_owned()).await?;
+                let mut calendars = if account.platform.unwrap() == "Outlook" {
+                    let (access_token, _) = microsoft::refresh_access_token(refresh_token).await;
+                    microsoft::MicrosoftGraph::get_calendars(access_token.to_owned()).await?
+                } else {
+                    let access_token = google::refresh_access_token(refresh_token).await;
+                    google::GoogleAPI::get_calendars(access_token.to_owned()).await?
+                };
 
-                    let prev_selected_calendars: Vec<String> = db.execute(Box::new(move |conn| CalendarModel::get_all_selected(conn, &account_id.to_owned())))??
+                let prev_selected_calendars: Vec<String> = db.execute(Box::new(move |conn| CalendarModel::get_all_selected(conn, &account_id.to_owned())))??
                     .into_iter()
                     .map(|c| c.calendar_id).collect();
 
-                    let mut defaults = vec![];
-                    for cal in calendars.iter() {
-                        defaults.push(prev_selected_calendars.contains(&cal.id));
-                    }
-
-                    let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect();
-
-                    let selected_calendars_idx : Vec<usize> = MultiSelect::with_theme(&ColorfulTheme::default()) 
-                    .items(&calendar_names)
-                    .defaults(&defaults)
-                    .with_prompt(format!("Select the calendars you want to use for {}", account.name))
-                    .interact()?;
-
-                    for (i, mut cal) in calendars.iter_mut().enumerate() {
-                        cal.selected = selected_calendars_idx.contains(&i);
-                    }
-
-                    db.execute(Box::new(move |conn| CalendarModel::delete_for_account(conn, &account_id)))??;
-                    let insert_calendars: Vec<CalendarModel> = calendars.into_iter()
-                    .map(|c| CalendarModel { account_id: account.id, calendar_id: c.id, calendar_name: c.name, is_selected: c.selected })
-                    .collect();
-
-                    db.execute(Box::new(|conn| CalendarModel::insert_many(conn, insert_calendars)))??;
+                let mut defaults = vec![];
+                for cal in calendars.iter() {
+                    defaults.push(prev_selected_calendars.contains(&cal.id));
                 }
+
+                let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect();
+
+                let selected_calendars_idx : Vec<usize> = MultiSelect::with_theme(&ColorfulTheme::default()) 
+                .items(&calendar_names)
+                .defaults(&defaults)
+                .with_prompt(format!("Select the calendars you want to use for {}", account.name))
+                .interact()?;
+
+                for (i, mut cal) in calendars.iter_mut().enumerate() {
+                    cal.selected = selected_calendars_idx.contains(&i);
+                }
+
+                db.execute(Box::new(move |conn| CalendarModel::delete_for_account(conn, &account_id)))??;
+                let insert_calendars: Vec<CalendarModel> = calendars.into_iter()
+                .map(|c| CalendarModel { account_id: account.id, calendar_id: c.id, calendar_name: c.name, is_selected: c.selected })
+                .collect();
+
+                db.execute(Box::new(|conn| CalendarModel::insert_many(conn, insert_calendars)))??;
             }
         },
         _ => {
@@ -200,12 +209,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .into_iter()
                     .map(|c| c.calendar_id).collect();
 
-                let refresh_token = store::get_token(&account.name)?;
-                let (access_token, _) = refresh_access_token(refresh_token).await;
 
                 if account.platform.unwrap() == "Outlook" {
+                    let refresh_token = store::get_token(&account.name)?;
+                    let (access_token, _) = microsoft::refresh_access_token(refresh_token).await;
+
                     for cal_id in selected_calendars {
-                        let mut account_events = MicrosoftGraph::get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
+                        let mut account_events = microsoft::MicrosoftGraph::get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
+                        events.append(&mut account_events);
+                    }
+                } else {
+                    let refresh_token = store::get_token(&account.name)?;
+                    let access_token = google::refresh_access_token(refresh_token).await;
+                    for cal_id in selected_calendars {
+                        let mut account_events = google::GoogleAPI::get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
                         events.append(&mut account_events);
                     }
                 }
