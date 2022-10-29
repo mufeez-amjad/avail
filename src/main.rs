@@ -1,5 +1,6 @@
 mod oauth;
 mod store;
+mod util;
 
 use std::sync::Arc;
 
@@ -16,16 +17,17 @@ use rusqlite::{Result};
 
 use oauth::client::MicrosoftOauthClient;
 use store::{Account, Model, CalendarModel};
+use util::{get_availability, get_free_time};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
-    /// Start of search window (default now)
+    /// Start of search window in the form of MM/DD/YYYY (default now)
     #[arg(short, long, value_parser = parse_datetime)]
     start: Option<DateTime<Local>>,
 
-    /// End of search window (default start + 7 days)
+    /// End of search window in the form of MM/DD/YYYY (default start + 7 days)
     #[arg(short, long, value_parser = parse_datetime)]
     end: Option<DateTime<Local>>,
 
@@ -35,7 +37,7 @@ struct Cli {
 
 fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
     let dt_str: String = arg.to_string();
-    let non_local_d = NaiveDate::parse_from_str(&dt_str, "%b %d %Y");
+    let non_local_d = NaiveDate::parse_from_str(&dt_str, "%m/%d/%Y");
     let time = NaiveTime::from_hms(0, 0, 0);
 
     if non_local_d.is_ok() {
@@ -147,7 +149,6 @@ struct GraphResponse<T> {
     error: Option<GraphError>
 }
 
-// {"error":{"code":"InvalidAuthenticationToken","message":"CompactToken validation failed with reason code: 80049228.","innerError":{"date":"2022-10-23T22:59:31","request-id":"878f5037-d852-446f-8913-04fb1a0401d5","client-request-id":"878f5037-d852-446f-8913-04fb1a0401d5"}}}
 #[derive(serde::Deserialize)]
 struct GraphError {
     code: String,
@@ -195,82 +196,6 @@ async fn get_calendar_events(token: String, calendar_id: String, start_time: Dat
     Ok(resp.value.unwrap())
 }
 
-fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<Local>, min: NaiveTime, max: NaiveTime) -> Vec<(Date<Local>, Vec<Availability>)> {
-    let mut avail: Vec<(Date<Local>, Vec<Availability>)> = vec![];
-    let duration = 30;
-
-    events.sort_by_key(|e| e.start);
-    
-    let days = events.into_iter().group_by(|e| (e.start.date()));
-
-    let mut iter = days.into_iter();
-
-    let mut dt = start;
-    while dt <= end {
-        let day = iter.next();
-
-        if let Some((date, events)) = day {
-            // Add days that are entirely free
-            while dt.date() < date {
-                // Whole day
-                let end = dt + Duration::days(1);
-                avail.push((dt.date(), vec![Availability { start: dt, end }]));
-
-                dt += Duration::days(1);
-            }
-            
-            // events is guaranteed to be non-empty because of the GroupBy
-            
-            // Check for availabilities within the day
-
-            let mut day_avail = vec![];
-            let mut curr_time = chrono::NaiveTime::from_hms(9, 0, 0);
-
-            for event in events {
-                let start = event.start;
-                let end = event.end;
-
-                // Have time before event
-                if curr_time < start.time() {
-                    // Meets requirement of minimum duration
-                    if start.time() - curr_time >= Duration::minutes(duration) {
-                        let start_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), curr_time), *Local.timestamp(0, 0).offset());
-                        let end_time = start;
-                        day_avail.push(Availability { start: start_time, end: end_time });
-                    }
-
-                    // Not available until end of this event
-                    curr_time = end.time()
-                } else {
-                    curr_time = std::cmp::max(end.time(), curr_time);
-                }
-            }
-
-            if curr_time < max {
-                let start_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), curr_time), *Local.timestamp(0, 0).offset());
-                let end_time = DateTime::from_local(NaiveDateTime::new(start.date_naive(), max), *Local.timestamp(0, 0).offset());
-                day_avail.push(Availability { start: start_time, end: end_time });
-            }
-
-            avail.push((dt.date(), day_avail));
-
-            // 12AM next day
-            dt = (dt + Duration::days(1)).date().and_hms(0, 0, 0);
-        } else {
-            // Add days that are entirely free
-            while dt <= end {
-                // Whole day
-                let end = dt + Duration::days(1);
-                avail.push((dt.date(), vec![Availability { start: dt, end }]));
-
-                dt += Duration::days(1);
-            }
-        }
-    }
-
-    avail
-}
-
 async fn get_authorization_code() -> (String, String) {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
     let token = client.get_authorization_code().await;
@@ -284,47 +209,23 @@ async fn refresh_access_token(refresh_token: String) -> (String, String) {
     token
 }
 
-fn get_availability(events: Vec<Event>) -> Vec<(Date<Local>, Vec<Availability>)> {
-    let start_time = Local::now();
-    let end_time = start_time + Duration::days(7);
-    let min = NaiveTime::from_hms(9, 0, 0);
-    let max = NaiveTime::from_hms(17, 0, 0);
-
-    let avails = get_free_time(events, start_time, end_time, min, max);
-
-    let margin = 20;
-
-    for (day, avail) in avails.iter() {
-        println!("{:-^margin$}", day.format("%a %B %e"));
-        for a in avail {
-            if a.end - a.start == Duration::days(1) {
-                println!("Whole day!");
-            } else {
-                let duration = a.end  - a.start;
-                print!("{} to {}", a.start.format("%H:%M"), a.end.format("%H:%M"));
-
-                print!(" (");
-                if duration.num_hours() >= 1 {
-                    print!("{}h", duration.num_hours());
-                    if duration.num_minutes() >= 1 {
-                        print!("{}m", duration.num_minutes() % 60);
-                    }
-                } else if duration.num_minutes() >= 1 {
-                    print!("{}m", duration.num_minutes())
-                }
-                println!(")");
-            }
-        }
-        println!()
-    }
-    avails
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = store::Store::new("./db.db3");
-    
+
+    let start_time = if let Some(start) = cli.start {
+        start
+    } else {
+        Local::now()
+    };
+
+    let end_time = if let Some(end) = cli.end {
+        end
+    } else {
+        start_time + Duration::days(7)
+    };
+
     match &cli.command {
         Some(Commands::Account(account_cmd)) => {
             match &account_cmd.command {
@@ -432,15 +333,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if account.platform.unwrap() == "Outlook" {
                     for cal_id in selected_calendars {
-                        let start_time = Local::now();
-                        let end_time = start_time + Duration::days(7);
                         let mut account_events = get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
                         events.append(&mut account_events);
                     }
                 }
             }
 
-            get_availability(events);
+            let availability = get_availability(events);
         },
     }
     

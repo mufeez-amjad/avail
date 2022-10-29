@@ -92,6 +92,7 @@ impl CalendarModel {
         }
         Ok(())
     }
+    
     pub fn get_all_selected(conn: &Connection, account_id: &u32) -> anyhow::Result<Vec<CalendarModel>> {
         let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where is_selected = true and account_id = ?")?;
         let prev_selected_calendars: Vec<CalendarModel> = stmt.query_map([account_id], |row| {
