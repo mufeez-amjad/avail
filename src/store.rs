@@ -161,6 +161,12 @@ pub fn store_token(user: &str, token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn get_token(user: &str) -> anyhow::Result<String> {
+    let entry = keyring::Entry::new(SERVICE_NAME, user);
+    let token = entry.get_password()?;
+    Ok(token)
+}
+
 pub fn delete_token(user: &str) -> anyhow::Result<()> {
     let entry = keyring::Entry::new(SERVICE_NAME, &user);
     entry.delete_password()?;

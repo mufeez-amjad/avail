@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let (_, refresh_token) = get_authorization_code().await;
                     store::store_token(&cmd.alias, &refresh_token)?;
                     let account = Account {name: cmd.alias.to_owned(), platform: Some(selections[selection].to_owned()), id: None };
-                    db.execute(Box::new(move |conn| account.insert(conn)));
+                    db.execute(Box::new(move |conn| account.insert(conn)))??;
                     println!("Successfully added account.");
                 },
                 AccountCommands::Remove(cmd) => {
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     {
                         store::delete_token(&cmd.alias)?;
                         let account = Account {name: cmd.alias.to_owned(), id: None, platform: None };
-                        db.execute(Box::new(move |conn| account.delete(conn)));
+                        db.execute(Box::new(move |conn| account.delete(conn)))??;
                         println!("Successfully removed account.");
                     }
                 }
@@ -146,15 +146,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!("- {} on {}", account.name.bold().blue(), account.platform.unwrap());
                         }
                     }
-
                 },
             }
         },
         Some(Commands::Calendar(_)) => {
             let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
             for account in accounts {
-                let entry = keyring::Entry::new("avail", &account.name);
-                let refresh_token = entry.get_password()?;
+                let refresh_token = store::get_token(&account.name)?;
 
                 let (access_token, _) = refresh_access_token(refresh_token).await;
 
@@ -188,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|c| CalendarModel { account_id: account.id, calendar_id: c.id, calendar_name: c.name, is_selected: c.selected })
                     .collect();
 
-                    db.execute(Box::new(|conn| CalendarModel::insert_many(conn, insert_calendars)));
+                    db.execute(Box::new(|conn| CalendarModel::insert_many(conn, insert_calendars)))??;
                 }
             }
         },
@@ -202,9 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .into_iter()
                     .map(|c| c.calendar_id).collect();
 
-                let entry = keyring::Entry::new("avail", &account.name);
-                let refresh_token = entry.get_password()?;
-
+                let refresh_token = store::get_token(&account.name)?;
                 let (access_token, _) = refresh_access_token(refresh_token).await;
 
                 if account.platform.unwrap() == "Outlook" {
