@@ -1,13 +1,11 @@
-use oauth2::basic::BasicTokenType;
 use oauth2::url::Url;
-use oauth2::{basic::BasicClient, revocation::StandardRevocableToken, TokenResponse};
+use oauth2::{basic::BasicClient, TokenResponse};
 // Alternatively, this can be oauth2::curl::http_client or a custom.
 use oauth2::reqwest::async_http_client;
 use oauth2::{
     AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, RevocationUrl, Scope, TokenUrl, StandardTokenResponse, EmptyExtraTokenFields,
+    RedirectUrl, Scope, TokenUrl,
 };
-use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 

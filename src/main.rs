@@ -1,6 +1,8 @@
 mod oauth;
 mod store;
 
+use std::sync::Arc;
+
 use dialoguer::{Select, MultiSelect, theme::ColorfulTheme, Confirm};
 use chrono::{prelude::*, Duration};
 use itertools::Itertools;
@@ -9,9 +11,10 @@ use serde::Deserialize;
 use serde_json;
 
 use clap::{Args, Parser, Subcommand};
-use rusqlite::{Connection, Result};
+use rusqlite::{Result};
 
 use oauth::client::MicrosoftOauthClient;
+use store::{Account, Model, CalendarModel};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -62,9 +65,9 @@ struct CalendarCmd {}
 #[derive(Subcommand)]
 enum AccountCommands {
     /// Adds an OAuth account
-    add(AccountAdd),
+    Add(AccountAdd),
     /// Removes an OAuth account
-    remove(AccountRemove),
+    Remove(AccountRemove),
 }
 
 #[derive(Args)]
@@ -319,7 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
         Some(Commands::Account(account_cmd)) => {
             match &account_cmd.command {
-                AccountCommands::add(cmd) => {
+                AccountCommands::Add(cmd) => {
                     let selections = &[
                         "Outlook",
                         "GCal",
@@ -333,117 +336,88 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let (_, refresh_token) = get_authorization_code().await;
                     store::store_token(&cmd.alias, &refresh_token)?;
-                    db.add_account(&cmd.alias, selections[selection])?;
-
+                    let account = Account {name: cmd.alias.to_owned(), platform: Some(selections[selection].to_owned()), id: None };
+                    db.execute(Box::new(move |conn| account.insert(conn)));
                     println!("Successfully added account.");
                 },
-                AccountCommands::remove(cmd) => {
+                AccountCommands::Remove(cmd) => {
                     if Confirm::with_theme(&ColorfulTheme::default())
                         .with_prompt(format!("Do you want to delete the account \"{}\"?", cmd.alias))
                         .interact()
                         .unwrap()
                     {
                         store::delete_token(&cmd.alias)?;
-                        db.remove_account(&cmd.alias);
-                        
+                        let account = Account {name: cmd.alias.to_owned(), id: None, platform: None };
+                        db.execute(Box::new(move |conn| account.delete(conn)));
                         println!("Successfully removed account.");
                     }
                 }
             }
         },
         Some(Commands::Calendar(_)) => {
-            let mut stmt = db.prepare("SELECT id, name, platform FROM accounts")?;
-            let accounts = stmt.query_map([], |row| {
-                let id: u32 = row.get(0)?;
-                let name: String = row.get(1)?;
-                let platform: String = row.get(2)?;
-                Ok((id, name, platform))
-            })?;
-
+            let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
             for account in accounts {
-                match account {
-                    // Destructure the second and third elements
-                    Ok((id, name, platform)) => {
-                        let entry = keyring::Entry::new("avail", &name);
-                        let refresh_token = entry.get_password()?;
+                let entry = keyring::Entry::new("avail", &account.name);
+                let refresh_token = entry.get_password()?;
 
-                        let (access_token, _) = refresh_access_token(refresh_token).await;
+                let (access_token, _) = refresh_access_token(refresh_token).await;
 
-                        if platform == "Outlook" {
-                            let mut calendars = get_calendars(access_token.to_owned()).await?;
+                let account_id = account.id.unwrap().to_owned();
+                if account.platform.unwrap() == "Outlook" {
+                    let mut calendars = get_calendars(access_token.to_owned()).await?;
 
-                            // Pull from database.
-                            let mut stmt = db.prepare("SELECT calendar_id FROM calendars where is_selected = true")?;
-                            let prev_selected_calendars: Vec<String> = stmt.query_map([], |row| {
-                                let id: String = row.get(0)?;
-                                Ok(id)
-                            })?.filter_map(|s| s.ok()).collect();
+                    let prev_selected_calendars: Vec<String> = db.execute(Box::new(move |conn| CalendarModel::get_all_selected(conn, &account_id.to_owned())))??
+                    .into_iter()
+                    .map(|c| c.calendar_id).collect();
 
-                            let mut defaults = vec![];
-                            for cal in calendars.iter() {
-                                defaults.push(prev_selected_calendars.contains(&cal.id));
-                            }
+                    let mut defaults = vec![];
+                    for cal in calendars.iter() {
+                        defaults.push(prev_selected_calendars.contains(&cal.id));
+                    }
 
-                            let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect();
-    
-                            let selected_calendars_idx : Vec<usize> = MultiSelect::with_theme(&ColorfulTheme::default()) 
-                            .items(&calendar_names)
-                            .defaults(&defaults)
-                            .with_prompt(format!("Select the calendars you want to use for {}", name))
-                            .interact()?;
+                    let calendar_names: Vec<String> = calendars.iter().map(|cal| cal.name.to_owned()).collect();
 
-                            for (i, mut cal) in calendars.iter_mut().enumerate() {
-                                cal.selected = selected_calendars_idx.contains(&i);
-                            }
+                    let selected_calendars_idx : Vec<usize> = MultiSelect::with_theme(&ColorfulTheme::default()) 
+                    .items(&calendar_names)
+                    .defaults(&defaults)
+                    .with_prompt(format!("Select the calendars you want to use for {}", account.name))
+                    .interact()?;
 
-                            db.execute("DELETE FROM calendars where account_id = ?", [id])?;
+                    for (i, mut cal) in calendars.iter_mut().enumerate() {
+                        cal.selected = selected_calendars_idx.contains(&i);
+                    }
 
-                            let mut stmt = db.prepare("INSERT INTO calendars (account_id, calendar_id, is_selected) VALUES (?, ?, ?)")?;
-                            for cal in calendars.into_iter() {
-                                stmt.execute((id, cal.id, cal.selected))?;
-                            }
-                        }
-                    },
-                    _ => println!("It doesn't matter what they are")
+                    db.execute(Box::new(move |conn| CalendarModel::delete_for_account(conn, &account_id)))??;
+                    let insert_calendars: Vec<CalendarModel> = calendars.into_iter()
+                    .map(|c| CalendarModel { account_id: account.id, calendar_id: c.id, calendar_name: c.name, is_selected: c.selected })
+                    .collect();
+
+                    db.execute(Box::new(|conn| CalendarModel::insert_many(conn, insert_calendars)));
                 }
             }
         },
         _ => {
-            let mut stmt = db.prepare("SELECT id, name, platform FROM accounts")?;
-            let accounts = stmt.query_map([], |row| {
-                let id: u32 = row.get(0)?;
-                let name: String = row.get(1)?;
-                let platform: String = row.get(2)?;
-                Ok((id, name, platform))
-            })?;
-
+            let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
             let mut events = vec![];
 
             for account in accounts {
-                match account {
-                    Ok((id, name, platform)) => {
-                        let mut stmt = db.prepare("SELECT calendar_id FROM calendars where is_selected = true and account_id = ?")?;
-                        
-                        let selected_calendars: Vec<String> = stmt.query_map([id], |row| {
-                            let calendar_id: String = row.get(0)?;
-                            Ok(calendar_id)
-                        })?.filter_map(|s| s.ok()).collect();
+                let account_id = account.id.unwrap().to_owned();
+                let selected_calendars: Vec<String> = db.execute(Box::new(move |conn| CalendarModel::get_all_selected(conn, &account_id)))??
+                    .into_iter()
+                    .map(|c| c.calendar_id).collect();
 
-                        let entry = keyring::Entry::new("avail", &name);
-                        let refresh_token = entry.get_password()?;
+                let entry = keyring::Entry::new("avail", &account.name);
+                let refresh_token = entry.get_password()?;
 
-                        let (access_token, _) = refresh_access_token(refresh_token).await;
+                let (access_token, _) = refresh_access_token(refresh_token).await;
 
-                        if platform == "Outlook" {
-                            for cal_id in selected_calendars {
-                                let start_time = Local::now();
-                                let end_time = start_time + Duration::days(7);
-                                let mut account_events = get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
-                                events.append(&mut account_events);
-                            }
-                        }
-                    },
-                    _ => println!("It doesn't matter what they are")
+                if account.platform.unwrap() == "Outlook" {
+                    for cal_id in selected_calendars {
+                        let start_time = Local::now();
+                        let end_time = start_time + Duration::days(7);
+                        let mut account_events = get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
+                        events.append(&mut account_events);
+                    }
                 }
             }
 

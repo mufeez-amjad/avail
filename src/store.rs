@@ -18,47 +18,98 @@ impl Platform {
     }
 }
 
-trait Model<T> {
-    fn get(&self, conn: Connection) -> anyhow::Result<Vec<T>>;
-    fn insert(&self, conn: Connection) -> anyhow::Result<()>;
-    fn delete(&self, conn: Connection) -> anyhow::Result<()>;
+pub trait Model<T> {
+    fn get(conn: &Connection) -> anyhow::Result<Vec<T>>;
+    fn insert(&self, conn: &Connection) -> anyhow::Result<()>;
+    fn delete(&self, conn: &Connection) -> anyhow::Result<()>;
 }
 
 pub struct Account {
-    id: u32,
-    name: String,
-    platform: String,
+    pub id: Option<u32>,
+    pub name: String,
+    pub platform: Option<String>,
 }
 
 impl Model<Account> for Account {
-    fn get(&self, conn: Connection) -> anyhow::Result<Vec<Account>> {
+    fn get(conn: &Connection) -> anyhow::Result<Vec<Account>> {
         let mut stmt = conn.prepare("SELECT id, name, platform FROM accounts")?;
         let accounts: Vec<Account> = stmt.query_map([], |row| {
             let id: u32 = row.get(0)?;
             let name: String = row.get(1)?;
             let platform: String = row.get(2)?;
             Ok(Account {
-                id,
+                id: Some(id),
                 name,
-                platform
+                platform: Some(platform)
             })
         })?.filter_map(|s| s.ok()).collect();
         Ok(accounts)
     }
 
-    fn insert(&self, conn: Connection) -> anyhow::Result<()> {
+    fn insert(&self, conn: &Connection) -> anyhow::Result<()> {
         conn.execute(
             "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
-            [self.name, self.platform],
+            [self.name.to_owned(), self.platform.as_ref().unwrap().to_owned()],
         )?;
         Ok(())
     }
 
-    fn delete(&self, conn: Connection) -> anyhow::Result<()> {
+    fn delete(&self, conn: &Connection) -> anyhow::Result<()> {
         conn.execute(
             "DELETE FROM accounts where name = ?",
-            [self.name],
+            [self.name.to_owned()],
         )?;
+        Ok(())
+    }
+}
+
+pub struct CalendarModel {
+    pub account_id: Option<u32>,
+    pub calendar_id: String,
+    pub calendar_name: String,
+    pub is_selected: bool,
+}
+
+impl Model<CalendarModel> for CalendarModel {
+    fn get(conn: &Connection) -> anyhow::Result<Vec<CalendarModel>> {
+        Ok(vec![])
+    }
+
+    fn insert(&self, conn: &Connection) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn delete(&self, conn: &Connection) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+impl CalendarModel {
+    pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
+        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, is_selected) VALUES (?, ?, ?)")?;
+        for cal in calendars.into_iter() {
+            stmt.execute((cal.account_id, cal.calendar_id, cal.is_selected))?;
+        }
+        Ok(())
+    }
+    pub fn get_all_selected(conn: &Connection, account_id: &u32) -> anyhow::Result<Vec<CalendarModel>> {
+        let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where is_selected = true and account_id = ?")?;
+        let prev_selected_calendars: Vec<CalendarModel> = stmt.query_map([account_id], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            Ok(CalendarModel {
+                account_id: None,
+                calendar_id: id,
+                calendar_name: name,
+                is_selected: true,
+            })
+        })?.filter_map(|s| s.ok()).collect();
+
+        Ok(prev_selected_calendars)
+    }
+
+    pub fn delete_for_account(conn: &Connection, account_id: &u32) -> anyhow::Result<()> {
+        conn.execute("DELETE FROM calendars where account_id = ?", [account_id])?;
         Ok(())
     }
 }
@@ -90,16 +141,8 @@ impl Store {
         }
     }
 
-    pub fn get<S, T: Model<S>>(&self, d: T) -> anyhow::Result<Vec<S>> {
-        d.get(self.connection)
-    }
-
-    pub fn insert<S, T: Model<S>>(&self, d: T) -> anyhow::Result<()> {
-        d.insert(self.connection)
-    }
-
-    pub fn delete<S, T: Model<S>>(&self, d: T) -> anyhow::Result<()> {
-        d.delete(self.connection)
+    pub fn execute<T>(&self, func: Box<dyn FnOnce(&Connection) -> T>) -> anyhow::Result<T> {
+        Ok(func(&self.connection))
     }
 }
 
