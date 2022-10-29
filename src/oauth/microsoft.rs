@@ -117,7 +117,11 @@ impl MicrosoftOauthClient {
                     state = CsrfToken::new(value.into_owned());
                 }
 
-                let message = "Go back to your terminal :)";
+                let message = "<html><body>
+                <script type=\"text/javascript\">
+                  window.close() ;
+                </script> 
+                </body></html>";
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
                     message.len(),

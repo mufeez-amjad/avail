@@ -1,23 +1,18 @@
 mod oauth;
 mod store;
 mod util;
-
-use std::sync::Arc;
+mod events;
 
 use dialoguer::{Select, MultiSelect, theme::ColorfulTheme, Confirm};
 use chrono::{prelude::*, Duration};
-use itertools::Itertools;
 use colored::Colorize;
-
-use serde::Deserialize;
-use serde_json;
 
 use clap::{Args, Parser, Subcommand};
 use rusqlite::{Result};
 
-use oauth::client::MicrosoftOauthClient;
 use store::{Account, Model, CalendarModel};
-use util::{get_availability, get_free_time};
+use util::{get_availability};
+use events::{microsoft::{get_authorization_code, refresh_access_token, MicrosoftGraph}, GetResources};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -89,125 +84,6 @@ struct AccountRemove {
 
 #[derive(Args)]
 struct AccountList {}
-
-#[derive(serde::Deserialize, Clone)]
-struct Calendar {
-    id: String,
-    name: String,
-
-    // TODO: use this field for default selection
-    #[serde(default)]
-    selected: bool,
-}
-
-#[derive(serde::Deserialize, Clone)]
-struct Event {
-    id: String,
-    #[serde(rename(deserialize = "subject"))]
-    name: String,
-
-    #[serde(deserialize_with = "deserialize_json_time")]
-    start: DateTime<Local>,
-    #[serde(deserialize_with = "deserialize_json_time")]
-    end: DateTime<Local>,
-}
-
-struct Availability {
-    start: DateTime<Local>,
-    end: DateTime<Local>,
-}
-
-fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Local>, D::Error>
-where
-	D: serde::de::Deserializer<'de>,
-{
-    let json: serde_json::value::Value = serde_json::value::Value::deserialize(deserializer)?;
-    let time_str = json.get("dateTime").expect("datetime").as_str().unwrap();
-    let tz_str = json.get("timeZone").expect("timeZone").as_str().unwrap();
-
-    // 2022-10-22T20:30:00.0000000
-    let naive_time = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S.%f").unwrap();
-    
-    Local.timestamp(0, 0).offset();
-
-    let datetime = match tz_str {
-        "UTC" => DateTime::<Utc>::from_utc(naive_time, Utc),
-        _ =>  DateTime::<Utc>::from_utc(naive_time, Utc),
-    };
-    Ok(datetime.with_timezone(&Local))
-}
-
-impl std::fmt::Display for Event {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}, {}, {}, {}", self.id, self.name, self.start, self.end)
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct GraphResponse<T> {
-    value: Option<Vec<T>>,
-    error: Option<GraphError>
-}
-
-#[derive(serde::Deserialize)]
-struct GraphError {
-    code: String,
-    message: String,
-}
-
-async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>> {
-    let resp: GraphResponse<Calendar> = reqwest::Client::new()
-        .get("https://graph.microsoft.com/v1.0/me/calendars")
-        .bearer_auth(token)
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await?;
-
-    if let Some(err) = resp.error {
-        return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
-    }
-
-    Ok(resp.value.unwrap())
-}
-
-async fn get_calendar_events(token: String, calendar_id: String, start_time: DateTime<Local>, end_time: DateTime<Local>) -> anyhow::Result<Vec<Event>> {
-    let start_time_str = str::replace(&start_time.format("%+").to_string(), "+", "-");
-    let end_time_str = str::replace(&end_time.format("%+").to_string(), "+", "-");
-
-    let url = format!("https://graph.microsoft.com/v1.0/me/calendars/{}/calendarView?startDateTime={}&endDateTime={}", calendar_id, start_time_str, end_time_str);
-
-    let resp: GraphResponse<Event> = reqwest::Client::new()
-        .get(url)
-        .bearer_auth(token)
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await?;
-
-    if let Some(err) = resp.error {
-        return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
-    }
-
-    Ok(resp.value.unwrap())
-}
-
-async fn get_authorization_code() -> (String, String) {
-    let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
-    let token = client.get_authorization_code().await;
-    token
-}
-
-async fn refresh_access_token(refresh_token: String) -> (String, String) {
-    let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
-    let token = client.refresh_access_token(refresh_token).await;
-    println!("refreshed token: {}, {}", token.0, token.1);
-    token
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -284,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let account_id = account.id.unwrap().to_owned();
                 if account.platform.unwrap() == "Outlook" {
-                    let mut calendars = get_calendars(access_token.to_owned()).await?;
+                    let mut calendars = MicrosoftGraph::get_calendars(access_token.to_owned()).await?;
 
                     let prev_selected_calendars: Vec<String> = db.execute(Box::new(move |conn| CalendarModel::get_all_selected(conn, &account_id.to_owned())))??
                     .into_iter()
@@ -333,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if account.platform.unwrap() == "Outlook" {
                     for cal_id in selected_calendars {
-                        let mut account_events = get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
+                        let mut account_events = MicrosoftGraph::get_calendar_events(access_token.to_owned(), cal_id.to_owned(), start_time, end_time).await?;
                         events.append(&mut account_events);
                     }
                 }

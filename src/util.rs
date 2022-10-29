@@ -1,3 +1,12 @@
+use chrono::{prelude::*, Duration};
+use itertools::Itertools;
+
+use crate::events::Event;
+
+pub struct Availability {
+    start: DateTime<Local>,
+    end: DateTime<Local>,
+}
 
 pub fn get_free_time(mut events: Vec<Event>, start: DateTime<Local>, end: DateTime<Local>, min: NaiveTime, max: NaiveTime) -> Vec<(Date<Local>, Vec<Availability>)> {
     let mut avail: Vec<(Date<Local>, Vec<Availability>)> = vec![];
