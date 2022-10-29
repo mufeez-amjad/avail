@@ -6,6 +6,7 @@ use std::sync::Arc;
 use dialoguer::{Select, MultiSelect, theme::ColorfulTheme, Confirm};
 use chrono::{prelude::*, Duration};
 use itertools::Itertools;
+use colored::Colorize;
 
 use serde::Deserialize;
 use serde_json;
@@ -68,6 +69,8 @@ enum AccountCommands {
     Add(AccountAdd),
     /// Removes an OAuth account
     Remove(AccountRemove),
+    /// Lists all OAuth accounts
+    List(AccountList),
 }
 
 #[derive(Args)]
@@ -81,6 +84,9 @@ struct AccountRemove {
     /// The name of the account to remove
     alias: String,
 }
+
+#[derive(Args)]
+struct AccountList {}
 
 #[derive(serde::Deserialize, Clone)]
 struct Calendar {
@@ -352,6 +358,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("Successfully removed account.");
                     }
                 }
+                AccountCommands::List(_) => {
+                    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+
+                    if accounts.len() == 0 {
+                        println!("Configured accounts: None");
+                    } else {
+                        println!("Configured accounts:");
+                        for account in accounts {
+                            println!("- {} on {}", account.name.bold().blue(), account.platform.unwrap());
+                        }
+                    }
+
+                },
             }
         },
         Some(Commands::Calendar(_)) => {

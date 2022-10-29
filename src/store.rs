@@ -86,9 +86,9 @@ impl Model<CalendarModel> for CalendarModel {
 
 impl CalendarModel {
     pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
-        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, is_selected) VALUES (?, ?, ?)")?;
+        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, calendar_name, is_selected) VALUES (?, ?, ?, ?)")?;
         for cal in calendars.into_iter() {
-            stmt.execute((cal.account_id, cal.calendar_id, cal.is_selected))?;
+            stmt.execute((cal.account_id.unwrap(), cal.calendar_id, cal.calendar_name, cal.is_selected))?;
         }
         Ok(())
     }
@@ -125,16 +125,22 @@ impl Store {
                     name        TEXT NOT NULL,
                     platform    TEXT NOT NULL
                 );
+            ",
+            (),
+        ).expect("failed to create accounts table");
+        conn.execute(
+            "
                 CREATE TABLE IF NOT EXISTS calendars (
                     account_id  INTEGER NOT NULL,
                     calendar_id TEXT NOT NULL,
+                    calendar_name TEXT NOT NULL,
                     is_selected BOOLEAN,
                     PRIMARY KEY (account_id, calendar_id),
                     FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
                 );
             ",
             (),
-        ).expect("failed to create tables");
+        ).expect("failed to create calendars table");
 
         Self {
             connection: conn,

@@ -70,6 +70,7 @@ impl MicrosoftOauthClient {
             .inner
             .get_authorization_url(vec!["https://graph.microsoft.com/Calendars.Read", "https://graph.microsoft.com/User.Read", "offline_access"]); // "https://graph.microsoft.com/Calendars.Write", "https://graph.microsoft.com/User.Read"
 
+        println!("Opening: {}", authorize_url.to_string());
         webbrowser::open(authorize_url.as_str()).expect("failed to open web browser");
         
         let mut token = None;

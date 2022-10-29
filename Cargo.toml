@@ -21,3 +21,4 @@ futures = "0.3.25"
 itertools = "0.10.5"
 clap = { version = "4.0.18", features = ["derive"] }
 rusqlite = { version = "0.28.0", features = ["bundled"] }
+colored = "2.0.0"
