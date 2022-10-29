@@ -20,4 +20,8 @@ dialoguer = "0.10.2"
 futures = "0.3.25"
 itertools = "0.10.5"
 clap = { version = "4.0.18", features = ["derive"] }
-rusqlite = { version = "0.28.0", features = ["bundled"] }
+
+sea-orm = { version = "0.10.0", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros" ] }
+async-std = { version = "^1", features = ["attributes", "tokio1"] }
+sea-orm-migration = { version = "0.10.0", features = ["runtime-tokio-rustls", "sqlx-sqlite"] }
+

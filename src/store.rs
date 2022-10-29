@@ -1,7 +1,11 @@
-use rusqlite::{Connection};
+use std::time::Duration;
+
+use sea_orm::ConnectOptions;
+use sea_orm::Database;
+use sea_orm::DatabaseConnection;
 
 pub struct Store {
-    connection: Connection, 
+    connection: DatabaseConnection, 
 }
 
 enum Platform {
@@ -18,91 +22,31 @@ impl Platform {
     }
 }
 
-trait Model<T> {
-    fn get(&self, conn: Connection) -> anyhow::Result<Vec<T>>;
-    fn insert(&self, conn: Connection) -> anyhow::Result<()>;
-    fn delete(&self, conn: Connection) -> anyhow::Result<()>;
-}
+use sea_orm::entity::prelude::*;
 
-pub struct Account {
-    id: u32,
-    name: String,
-    platform: String,
-}
-
-impl Model<Account> for Account {
-    fn get(&self, conn: Connection) -> anyhow::Result<Vec<Account>> {
-        let mut stmt = conn.prepare("SELECT id, name, platform FROM accounts")?;
-        let accounts: Vec<Account> = stmt.query_map([], |row| {
-            let id: u32 = row.get(0)?;
-            let name: String = row.get(1)?;
-            let platform: String = row.get(2)?;
-            Ok(Account {
-                id,
-                name,
-                platform
-            })
-        })?.filter_map(|s| s.ok()).collect();
-        Ok(accounts)
-    }
-
-    fn insert(&self, conn: Connection) -> anyhow::Result<()> {
-        conn.execute(
-            "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
-            [self.name, self.platform],
-        )?;
-        Ok(())
-    }
-
-    fn delete(&self, conn: Connection) -> anyhow::Result<()> {
-        conn.execute(
-            "DELETE FROM accounts where name = ?",
-            [self.name],
-        )?;
-        Ok(())
-    }
-}
+#[derive(Copy, Clone, Default, Debug, DeriveEntity)]
+pub struct Entity;
 
 impl Store {
-    pub fn new(path: &str) -> Self {
-        let conn = Connection::open(path).expect("failed to open database");
-        conn.execute("PRAGMA foreign_keys = true", ()).expect("failed to enable foreign keys");
-        conn.execute(
-            "
-                CREATE TABLE IF NOT EXISTS accounts (
-                    id          INTEGER PRIMARY KEY,
-                    name        TEXT NOT NULL,
-                    platform    TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS calendars (
-                    account_id  INTEGER NOT NULL,
-                    calendar_id TEXT NOT NULL,
-                    is_selected BOOLEAN,
-                    PRIMARY KEY (account_id, calendar_id),
-                    FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
-                );
-            ",
-            (),
-        ).expect("failed to create tables");
+    pub async fn new(path: &str) -> Self {
+        let mut opt = ConnectOptions::new("./db.db3".to_owned());
+        opt.connect_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(8))
+        .max_lifetime(Duration::from_secs(8))
+        .sqlx_logging(true);
+
+        let db = Database::connect(opt).await.expect("failed to open database");
+        Migrator::up(&db, None).await?;
 
         Self {
-            connection: conn,
+            connection: db,
         }
-    }
-
-    pub fn get<S, T: Model<S>>(&self, d: T) -> anyhow::Result<Vec<S>> {
-        d.get(self.connection)
-    }
-
-    pub fn insert<S, T: Model<S>>(&self, d: T) -> anyhow::Result<()> {
-        d.insert(self.connection)
-    }
-
-    pub fn delete<S, T: Model<S>>(&self, d: T) -> anyhow::Result<()> {
-        d.delete(self.connection)
     }
 }
 
+/*
+    Keyring functions
+*/
 const SERVICE_NAME: &str = "avail";
 
 pub fn store_token(user: &str, token: &str) -> anyhow::Result<()> {
