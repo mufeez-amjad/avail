@@ -3,18 +3,23 @@ mod oauth;
 mod store;
 mod util;
 
+use std::{thread, process::exit};
+
 use chrono::{prelude::*, Duration};
 use colored::Colorize;
-use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect, Select};
-
+use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect, Select, FuzzySelect};
+use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressStyle};
 use clap::{Args, Parser, Subcommand};
+use itertools::Itertools;
+use regex::Regex;
 use rusqlite::Result;
+use tokio::sync::oneshot;
 
 use events::{google, microsoft, GetResources};
 use store::{Account, CalendarModel, Model};
 use util::get_availability;
 
-use crate::store::Platform;
+use crate::{store::Platform, util::Availability};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -27,6 +32,10 @@ struct Cli {
     /// End of search window in the form of MM/DD/YYYY (default start + 7 days)
     #[arg(short, long, value_parser = parse_datetime)]
     end: Option<DateTime<Local>>,
+
+    /// Duration for availability window (default 30 minutes)
+    #[arg(short, long, value_parser = parse_duration)]
+    duration: Option<Duration>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -43,6 +52,29 @@ fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
         Ok(Local.from_local_datetime(&datetime).unwrap())
     } else {
         Err(non_local_d.err().unwrap())
+    }
+}
+
+fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
+    let duration_str: String = arg.to_string();
+
+    let re = Regex::new(r"([0-9]*)(h|m)").unwrap();
+    let caps = re.captures(&duration_str).unwrap();
+
+    let group_1 = caps.get(1);
+    let group_2 = caps.get(2);
+
+    if group_1.is_none() || group_2.is_none() {
+        Err(anyhow::anyhow!("Failed to parse duration."))
+    } else {
+        let num = group_1.unwrap().as_str().parse::<u32>()?;
+        let unit = group_2.unwrap().as_str();
+
+        match unit {
+            "h" => Ok(Duration::hours(num.into())),
+            "m" => Ok(Duration::minutes(num.into())),
+            _ => Err(anyhow::anyhow!("Unsupported duration unit")),
+        }
     }
 }
 
@@ -92,24 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = store::Store::new("./db.db3");
 
-    let start_time = if let Some(start) = cli.start {
-        start
-    } else {
-        Local::now()
-    };
-
-    let end_time = if let Some(end) = cli.end {
-        end
-    } else {
-        start_time + Duration::days(7)
-    };
-
-    println!(
-        "Finding availability between {} and {}",
-        start_time.format("%b %-d %Y"),
-        end_time.format("%b %-d %Y")
-    );
-
     match &cli.command {
         Some(Commands::Account(account_cmd)) => match &account_cmd.command {
             AccountCommands::Add(cmd) => {
@@ -125,11 +139,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Platform::Microsoft => {
                         let (_, refresh_token) = microsoft::get_authorization_code().await;
                         store::store_token(&cmd.alias, &refresh_token)?;
-                    },
+                    }
                     Platform::Google => {
                         let (_, refresh_token) = google::get_authorization_code().await;
                         store::store_token(&cmd.alias, &refresh_token)?;
-                    },
+                    }
                 }
 
                 let account = Account {
@@ -244,6 +258,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => {
+            let start_time = if let Some(start) = cli.start {
+                start
+            } else {
+                Local::now()
+            };
+
+            let end_time = if let Some(end) = cli.end {
+                end
+            } else {
+                start_time + Duration::days(7)
+            };
+
+            let duration = if let Some(d) = cli.duration {
+                d
+            } else {
+                Duration::minutes(30)
+            };
+
+            println!(
+                "Finding availability between {} and {}\n",
+                format!("{}", start_time.format("%b %-d %Y")).bold().blue(),
+                format!("{}", end_time.format("%b %-d %Y")).bold().blue()
+            );
+
+            let m = MultiProgress::new();
+            let spinner_style = ProgressStyle::with_template(&"{spinner} {wide_msg}".blue())
+            .unwrap()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈✓");
+            
+
+            let pb = m.add(ProgressBar::new(1));
+            pb.set_style(spinner_style.clone());
+            pb.set_message("Retrieving events...");
+            pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
+
             let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
             let mut events = vec![];
 
@@ -292,7 +341,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let availability = get_availability(events);
+            pb.set_message("Computing availabilities...");
+
+            let availability = get_availability(events, duration);
+            let slots: Vec<Availability> = availability.into_iter().map(|(d, a)| a).flatten().collect();
+
+            pb.finish_with_message("Computed availabilities.");
+            
+            let selection = MultiSelect::with_theme(&ColorfulTheme::default())
+            .with_prompt("Select time window(s)")
+            .items(&slots[..])
+            .interact()
+            .unwrap();
         }
     }
 
