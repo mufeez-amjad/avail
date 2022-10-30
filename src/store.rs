@@ -4,7 +4,8 @@ pub struct Store {
     connection: Connection,
 }
 
-enum Platform {
+#[derive(Clone, Copy)]
+pub enum Platform {
     Microsoft,
     Google,
 }
@@ -18,6 +19,12 @@ impl Platform {
     }
 }
 
+impl std::fmt::Display for Platform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 pub trait Model<T> {
     fn get(conn: &Connection) -> anyhow::Result<Vec<T>>;
     fn insert(&self, conn: &Connection) -> anyhow::Result<()>;
@@ -27,7 +34,7 @@ pub trait Model<T> {
 pub struct Account {
     pub id: Option<u32>,
     pub name: String,
-    pub platform: Option<String>,
+    pub platform: Option<Platform>,
 }
 
 impl Model<Account> for Account {
@@ -37,7 +44,14 @@ impl Model<Account> for Account {
             .query_map([], |row| {
                 let id: u32 = row.get(0)?;
                 let name: String = row.get(1)?;
-                let platform: String = row.get(2)?;
+                let platform_str: String = row.get(2)?;
+
+                let platform = if platform_str == Platform::Microsoft.as_str() {
+                    Platform::Microsoft
+                } else {
+                    Platform::Google
+                };
+
                 Ok(Account {
                     id: Some(id),
                     name,
@@ -54,7 +68,7 @@ impl Model<Account> for Account {
             "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
             [
                 self.name.to_owned(),
-                self.platform.as_ref().unwrap().to_owned(),
+                self.platform.as_ref().unwrap().as_str().to_string(),
             ],
         )?;
         Ok(())

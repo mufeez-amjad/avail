@@ -14,6 +14,8 @@ use events::{google, microsoft, GetResources};
 use store::{Account, CalendarModel, Model};
 use util::get_availability;
 
+use crate::store::Platform;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -102,10 +104,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_time + Duration::days(7)
     };
 
+    println!(
+        "Finding availability between {} and {}",
+        start_time.format("%b %-d %Y"),
+        end_time.format("%b %-d %Y")
+    );
+
     match &cli.command {
         Some(Commands::Account(account_cmd)) => match &account_cmd.command {
             AccountCommands::Add(cmd) => {
-                let selections = &["Outlook", "GCal"];
+                let selections = &[Platform::Google, Platform::Microsoft];
 
                 let selection = Select::with_theme(&ColorfulTheme::default())
                     .with_prompt("Which platform would you like to add an account for?")
@@ -113,17 +121,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .interact()
                     .unwrap();
 
-                if selection == 0 {
-                    let (_, refresh_token) = microsoft::get_authorization_code().await;
-                    store::store_token(&cmd.alias, &refresh_token)?;
-                } else if selection == 1 {
-                    let (_, refresh_token) = google::get_authorization_code().await;
-                    store::store_token(&cmd.alias, &refresh_token)?;
+                match selections[selection] {
+                    Platform::Microsoft => {
+                        let (_, refresh_token) = microsoft::get_authorization_code().await;
+                        store::store_token(&cmd.alias, &refresh_token)?;
+                    },
+                    Platform::Google => {
+                        let (_, refresh_token) = google::get_authorization_code().await;
+                        store::store_token(&cmd.alias, &refresh_token)?;
+                    },
                 }
 
                 let account = Account {
                     name: cmd.alias.to_owned(),
-                    platform: Some(selections[selection].to_owned()),
+                    platform: Some(selections[selection]),
                     id: None,
                 };
                 db.execute(Box::new(move |conn| account.insert(conn)))??;
@@ -171,12 +182,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let refresh_token = store::get_token(&account.name)?;
 
                 let account_id = account.id.unwrap().to_owned();
-                let mut calendars = if account.platform.unwrap() == "Outlook" {
-                    let (access_token, _) = microsoft::refresh_access_token(refresh_token).await;
-                    microsoft::MicrosoftGraph::get_calendars(access_token.to_owned()).await?
-                } else {
-                    let access_token = google::refresh_access_token(refresh_token).await;
-                    google::GoogleAPI::get_calendars(access_token.to_owned()).await?
+                let mut calendars = match account.platform.unwrap() {
+                    Platform::Microsoft => {
+                        let (access_token, _) =
+                            microsoft::refresh_access_token(refresh_token).await;
+                        microsoft::MicrosoftGraph::get_calendars(access_token.to_owned()).await?
+                    }
+                    Platform::Google => {
+                        let access_token = google::refresh_access_token(refresh_token).await;
+                        google::GoogleAPI::get_calendars(access_token.to_owned()).await?
+                    }
                 };
 
                 let prev_selected_calendars: Vec<String> = db
@@ -212,6 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 db.execute(Box::new(move |conn| {
                     CalendarModel::delete_for_account(conn, &account_id)
                 }))??;
+
                 let insert_calendars: Vec<CalendarModel> = calendars
                     .into_iter()
                     .map(|c| CalendarModel {
@@ -241,32 +257,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|c| c.calendar_id)
                     .collect();
 
-                if account.platform.unwrap() == "Outlook" {
-                    let refresh_token = store::get_token(&account.name)?;
-                    let (access_token, _) = microsoft::refresh_access_token(refresh_token).await;
+                match account.platform.unwrap() {
+                    Platform::Microsoft => {
+                        let refresh_token = store::get_token(&account.name)?;
+                        let (access_token, _) =
+                            microsoft::refresh_access_token(refresh_token).await;
 
-                    for cal_id in selected_calendars {
-                        let mut account_events = microsoft::MicrosoftGraph::get_calendar_events(
-                            access_token.to_owned(),
-                            cal_id.to_owned(),
-                            start_time,
-                            end_time,
-                        )
-                        .await?;
-                        events.append(&mut account_events);
+                        for cal_id in selected_calendars {
+                            let mut account_events =
+                                microsoft::MicrosoftGraph::get_calendar_events(
+                                    access_token.to_owned(),
+                                    cal_id.to_owned(),
+                                    start_time,
+                                    end_time,
+                                )
+                                .await?;
+                            events.append(&mut account_events);
+                        }
                     }
-                } else {
-                    let refresh_token = store::get_token(&account.name)?;
-                    let access_token = google::refresh_access_token(refresh_token).await;
-                    for cal_id in selected_calendars {
-                        let mut account_events = google::GoogleAPI::get_calendar_events(
-                            access_token.to_owned(),
-                            cal_id.to_owned(),
-                            start_time,
-                            end_time,
-                        )
-                        .await?;
-                        events.append(&mut account_events);
+                    Platform::Google => {
+                        let refresh_token = store::get_token(&account.name)?;
+                        let access_token = google::refresh_access_token(refresh_token).await;
+                        for cal_id in selected_calendars {
+                            let mut account_events = google::GoogleAPI::get_calendar_events(
+                                access_token.to_owned(),
+                                cal_id.to_owned(),
+                                start_time,
+                                end_time,
+                            )
+                            .await?;
+                            events.append(&mut account_events);
+                        }
                     }
                 }
             }

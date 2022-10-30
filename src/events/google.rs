@@ -34,7 +34,8 @@ where
     let tz_str = json.get("timeZone").expect("timeZone").as_str().unwrap();
 
     // 2022-10-22T20:30:00.0000000
-    let datetime = DateTime::parse_from_rfc3339(time_str).expect(&format!("failed to parse datetime {}", time_str));
+    let datetime = DateTime::parse_from_rfc3339(time_str)
+        .expect(&format!("failed to parse datetime {}", time_str));
 
     Ok(datetime.with_timezone(&Local))
 }
@@ -133,7 +134,17 @@ impl GetResources for GoogleAPI {
             return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
         }
 
-        let events = resp.items.unwrap().into_iter().map(|e| Event { id: e.id, name: e.name, start: e.start, end: e.end }).collect();
+        let events = resp
+            .items
+            .unwrap()
+            .into_iter()
+            .map(|e| Event {
+                id: e.id,
+                name: e.name,
+                start: e.start,
+                end: e.end,
+            })
+            .collect();
 
         Ok(events)
     }
