@@ -20,12 +20,12 @@ struct GoogleEvent {
     name: String,
 
     #[serde(deserialize_with = "deserialize_json_time")]
-    start: DateTime<Local>,
+    start: DateTime<Utc>,
     #[serde(deserialize_with = "deserialize_json_time")]
-    end: DateTime<Local>,
+    end: DateTime<Utc>,
 }
 
-fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Local>, D::Error>
+fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
@@ -37,7 +37,7 @@ where
     let datetime = DateTime::parse_from_rfc3339(time_str)
         .expect(&format!("failed to parse datetime {}", time_str));
 
-    Ok(datetime.with_timezone(&Local))
+    Ok(datetime.with_timezone(&Utc))
 }
 
 #[derive(serde::Deserialize)]

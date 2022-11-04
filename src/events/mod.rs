@@ -13,8 +13,8 @@ pub struct Calendar {
 pub struct Event {
     pub id: String,
     pub name: String,
-    pub start: DateTime<Local>,
-    pub end: DateTime<Local>,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
 }
 
 #[async_trait]

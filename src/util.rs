@@ -3,12 +3,25 @@ use itertools::Itertools;
 
 use crate::events::Event;
 
-pub struct Availability {
-    start: DateTime<Local>,
-    end: DateTime<Local>,
+#[derive(Clone, Copy)]
+pub struct Availability<T: TimeZone>
+where
+    <T as chrono::TimeZone>::Offset: Copy,
+{
+    pub start: DateTime<T>,
+    pub end: DateTime<T>,
 }
 
-impl std::fmt::Display for Availability {
+impl Availability<Utc> {
+    pub fn to_local(&self) -> Availability<Local> {
+        Availability {
+            start: DateTime::from(self.start),
+            end: DateTime::from(self.end),
+        }
+    }
+}
+
+impl std::fmt::Display for Availability<Local> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let duration = self.end - self.start;
 
@@ -24,18 +37,40 @@ impl std::fmt::Display for Availability {
         }
 
         let day = self.start.format("%b %d %Y");
-        write!(f, "{} - {} to {} ({})", day, self.start.format("%I:%M %p"), self.end.format("%I:%M %p"), duration_str)
+        write!(
+            f,
+            "{} - {} to {} ({})",
+            day,
+            self.start.format("%I:%M %p"),
+            self.end.format("%I:%M %p"),
+            duration_str
+        )
+    }
+}
+
+impl<T: TimeZone> Availability<T>
+where
+    <T as chrono::TimeZone>::Offset: Copy,
+{
+    fn overlaps(&self, other: &Availability<T>) -> bool {
+        (other.start >= self.start && other.start <= self.end)
+            || (other.end >= self.start && other.end <= self.end)
+    }
+
+    fn merge(&mut self, other: &Availability<T>) {
+        self.start = DateTime::min(self.start, other.start);
+        self.end = DateTime::max(self.end, other.end);
     }
 }
 
 pub fn get_free_time(
     mut events: Vec<Event>,
-    start: DateTime<Local>,
-    end: DateTime<Local>,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
     min: NaiveTime,
     max: NaiveTime,
-) -> Vec<(Date<Local>, Vec<Availability>)> {
-    let mut avail: Vec<(Date<Local>, Vec<Availability>)> = vec![];
+) -> Vec<(Date<Utc>, Vec<Availability<Utc>>)> {
+    let mut avail: Vec<(Date<Utc>, Vec<Availability<Utc>>)> = vec![];
     let duration = 30;
 
     events.sort_by_key(|e| e.start);
@@ -52,7 +87,7 @@ pub fn get_free_time(
             // Add days that are entirely free
             while dt.date() < date {
                 // Whole day
-                let end = (dt + Duration::days(1)).with_hour(0).unwrap().with_minute(0).unwrap();
+                let end = (dt + Duration::days(1)).date().and_hms(0, 0, 0);
                 avail.push((dt.date(), vec![Availability { start: dt, end }]));
 
                 dt = end;
@@ -73,10 +108,9 @@ pub fn get_free_time(
                 if curr_time < start.time() {
                     // Meets requirement of minimum duration
                     if start.time() - curr_time >= Duration::minutes(duration) {
-                        let start_time = DateTime::from_local(
-                            NaiveDateTime::new(start.date_naive(), curr_time),
-                            *Local.timestamp(0, 0).offset(),
-                        );
+                        let start_date_time = NaiveDateTime::new(start.date_naive(), curr_time);
+                        let start_time = Utc.from_utc_datetime(&start_date_time);
+
                         let end_time = start;
                         day_avail.push(Availability {
                             start: start_time,
@@ -92,14 +126,11 @@ pub fn get_free_time(
             }
 
             if curr_time < max {
-                let start_time = DateTime::from_local(
-                    NaiveDateTime::new(start.date_naive(), curr_time),
-                    *Local.timestamp(0, 0).offset(),
-                );
-                let end_time = DateTime::from_local(
-                    NaiveDateTime::new(start.date_naive(), max),
-                    *Local.timestamp(0, 0).offset(),
-                );
+                let start_date_time = NaiveDateTime::new(start.date_naive(), curr_time);
+                let start_time = Utc.from_utc_datetime(&start_date_time);
+
+                let end_date_time = NaiveDateTime::new(start.date_naive(), max);
+                let end_time = Utc.from_utc_datetime(&end_date_time);
                 day_avail.push(Availability {
                     start: start_time,
                     end: end_time,
@@ -128,8 +159,8 @@ pub fn get_free_time(
 pub fn get_availability(
     events: Vec<Event>,
     duration: Duration,
-) -> Vec<(Date<Local>, Vec<Availability>)> {
-    let start_time = Local::now();
+) -> Vec<(Date<Utc>, Vec<Availability<Utc>>)> {
+    let start_time = Utc::now();
     let end_time = start_time + Duration::days(7);
     let min = NaiveTime::from_hms(9, 0, 0);
     let max = NaiveTime::from_hms(17, 0, 0);
@@ -150,4 +181,48 @@ pub fn get_availability(
         .collect();
 
     avails
+}
+
+pub fn split_availability<T: TimeZone>(
+    avails: &Vec<&Availability<T>>,
+    duration: Duration,
+) -> Vec<Availability<T>>
+where
+    <T as chrono::TimeZone>::Offset: Copy,
+{
+    let mut res = vec![];
+
+    for avail in avails {
+        let mut curr = avail.start;
+        while curr + duration <= avail.end {
+            res.push(Availability {
+                start: curr,
+                end: curr + duration,
+            });
+            curr += duration;
+        }
+    }
+
+    res
+}
+
+pub fn merge_overlapping_avails<T: TimeZone>(avails: Vec<Availability<T>>) -> Vec<Availability<T>>
+where
+    <T as chrono::TimeZone>::Offset: Copy,
+{
+    let mut res: Vec<Availability<T>> = vec![];
+
+    for avail in avails {
+        if let Some(last) = res.last_mut() {
+            if last.overlaps(&avail) {
+                last.merge(&avail);
+            } else {
+                res.push(avail);
+            }
+        } else {
+            res.push(avail);
+        }
+    }
+
+    res
 }

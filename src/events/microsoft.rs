@@ -22,12 +22,12 @@ struct GraphEvent {
     name: String,
 
     #[serde(deserialize_with = "deserialize_json_time")]
-    start: DateTime<Local>,
+    start: DateTime<Utc>,
     #[serde(deserialize_with = "deserialize_json_time")]
-    end: DateTime<Local>,
+    end: DateTime<Utc>,
 }
 
-fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Local>, D::Error>
+fn deserialize_json_time<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
@@ -38,13 +38,12 @@ where
     // 2022-10-22T20:30:00.0000000
     let naive_time = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S.%f").unwrap();
 
-    Local.timestamp(0, 0).offset();
-
-    let datetime = match tz_str {
-        "UTC" => DateTime::<Utc>::from_utc(naive_time, Utc),
+    let utc_datetime = match tz_str {
+        "UTC" => DateTime::from_utc(naive_time, Utc),
         _ => DateTime::<Utc>::from_utc(naive_time, Utc),
     };
-    Ok(datetime.with_timezone(&Local))
+
+    Ok(utc_datetime)
 }
 
 #[derive(serde::Deserialize)]

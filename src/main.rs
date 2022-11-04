@@ -3,23 +3,18 @@ mod oauth;
 mod store;
 mod util;
 
-use std::{thread, process::exit};
-
 use chrono::{prelude::*, Duration};
-use colored::Colorize;
-use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect, Select, FuzzySelect};
-use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressStyle};
 use clap::{Args, Parser, Subcommand};
+use colored::Colorize;
+use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect, Select};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use regex::Regex;
 use rusqlite::Result;
-use tokio::sync::oneshot;
 
 use events::{google, microsoft, GetResources};
-use store::{Account, CalendarModel, Model};
-use util::get_availability;
-
-use crate::{store::Platform, util::Availability};
+use store::{Account, CalendarModel, Model, Platform};
+use util::{get_availability, merge_overlapping_avails, split_availability, Availability};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -284,9 +279,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let m = MultiProgress::new();
             let spinner_style = ProgressStyle::with_template(&"{spinner} {wide_msg}".blue())
-            .unwrap()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈✓");
-            
+                .unwrap()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈✔");
 
             let pb = m.add(ProgressBar::new(1));
             pb.set_style(spinner_style.clone());
@@ -344,15 +338,79 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pb.set_message("Computing availabilities...");
 
             let availability = get_availability(events, duration);
-            let slots: Vec<Availability> = availability.into_iter().map(|(d, a)| a).flatten().collect();
+            let slots: Vec<Availability<Local>> = availability
+                .into_iter()
+                .map(|(d, a)| a)
+                .flatten()
+                .map(|a| a.to_local())
+                .collect();
 
             pb.finish_with_message("Computed availabilities.");
-            
+
+            // TODO: add multi-level multiselect
+            // Right arrow goes into a time window (can select granular windows)
+            // Left arrow goes back to root
+            // Needs to work with paging
             let selection = MultiSelect::with_theme(&ColorfulTheme::default())
-            .with_prompt("Select time window(s)")
-            .items(&slots[..])
-            .interact()
-            .unwrap();
+                .with_prompt("Select time window(s)")
+                .items(&slots[..])
+                .interact()
+                .unwrap();
+
+            let selected_slots: Vec<&Availability<Local>> = selection
+                .into_iter()
+                .map(|i| slots.get(i).unwrap())
+                .collect();
+
+            let days = selected_slots.into_iter().group_by(|e| (e.start.date()));
+
+            let mut iter = days.into_iter().peekable();
+
+            let mut selected: Vec<&Availability<Local>> = vec![];
+
+            while iter.peek().is_some() {
+                let i = iter.next();
+                let (day, avails) = i.unwrap();
+
+                let day_slots: Vec<&Availability<Local>> = avails.into_iter().map(|a| a).collect();
+                let windows = split_availability(&day_slots, duration);
+
+                let selection = MultiSelect::with_theme(&ColorfulTheme::default())
+                    .with_prompt(format!(
+                        "Select time window(s) for {}",
+                        day.format("%b %d %Y")
+                    ))
+                    .items(&windows[..])
+                    .interact()
+                    .unwrap();
+
+                let mut selected_windows: Vec<&Availability<Local>> = selection
+                    .into_iter()
+                    .map(|i| slots.get(i).unwrap())
+                    .collect();
+                selected.append(&mut selected_windows);
+            }
+
+            let avails: Vec<Availability<Local>> =
+                merge_overlapping_avails(selected.into_iter().map(|a| a.clone()).collect());
+
+            let avail_days = avails.into_iter().group_by(|e| (e.start.date()));
+
+            let mut iter = avail_days.into_iter().peekable();
+
+            while iter.peek().is_some() {
+                let i = iter.next();
+                let (day, avails) = i.unwrap();
+
+                println!("{}", day.format("%b %d %Y"));
+                for avail in avails {
+                    println!(
+                        "- {} to {}",
+                        avail.start.format("%I:%M %p"),
+                        avail.end.format("%I:%M %p")
+                    );
+                }
+            }
         }
     }
 
