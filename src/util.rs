@@ -3,10 +3,10 @@ use itertools::Itertools;
 
 use crate::events::Event;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Availability<T: TimeZone>
 where
-    <T as chrono::TimeZone>::Offset: Copy,
+    <T as TimeZone>::Offset: Copy,
 {
     pub start: DateTime<T>,
     pub end: DateTime<T>,
@@ -50,11 +50,10 @@ impl std::fmt::Display for Availability<Local> {
 
 impl<T: TimeZone> Availability<T>
 where
-    <T as chrono::TimeZone>::Offset: Copy,
+    <T as TimeZone>::Offset: Copy,
 {
     fn overlaps(&self, other: &Availability<T>) -> bool {
-        (other.start >= self.start && other.start <= self.end)
-            || (other.end >= self.start && other.end <= self.end)
+        (self.start <= other.end) && (other.start <= self.end)
     }
 
     fn merge(&mut self, other: &Availability<T>) {
@@ -79,18 +78,24 @@ pub fn get_free_time(
 
     let mut iter = days.into_iter();
 
-    let mut dt = start;
-    while dt <= end {
+    // Start at start day and min time
+    let mut curr = start.date().and_hms(min.hour(), min.minute(), 0);
+
+    while curr < end {
         let day = iter.next();
 
+        // Have another day of events to process
         if let Some((date, events)) = day {
             // Add days that are entirely free
-            while dt.date() < date {
-                // Whole day
-                let end = (dt + Duration::days(1)).date().and_hms(0, 0, 0);
-                avail.push((dt.date(), vec![Availability { start: dt, end }]));
+            while curr.date() < date {
+                // Whole day till max
+                let end = curr.date().and_hms(max.hour(), max.minute(), 0);
+                avail.push((curr.date(), vec![Availability { start: curr, end }]));
 
-                dt = end;
+                // min next day
+                curr = (curr + Duration::days(1))
+                    .date()
+                    .and_hms(min.hour(), min.minute(), 0);
             }
 
             // events is guaranteed to be non-empty because of the GroupBy
@@ -98,7 +103,7 @@ pub fn get_free_time(
             // Check for availabilities within the day
 
             let mut day_avail = vec![];
-            let mut curr_time = chrono::NaiveTime::from_hms(9, 0, 0);
+            let mut curr_time = min;
 
             for event in events {
                 let start = event.start;
@@ -107,48 +112,54 @@ pub fn get_free_time(
                 // Have time before event
                 if curr_time < start.time() {
                     // Meets requirement of minimum duration
-                    if start.time() - curr_time >= Duration::minutes(duration) {
-                        let start_date_time = NaiveDateTime::new(start.date_naive(), curr_time);
-                        let start_time = Utc.from_utc_datetime(&start_date_time);
-
-                        let end_time = start;
+                    if start.time() - curr_time >= Duration::minutes(duration) && curr_time < max {
+                        let avail_start =
+                            start
+                                .date()
+                                .and_hms(curr_time.hour(), curr_time.minute(), 0);
+                        let avail_end = start;
                         day_avail.push(Availability {
-                            start: start_time,
-                            end: end_time,
+                            start: avail_start,
+                            end: avail_end,
                         });
                     }
-
-                    // Not available until end of this event
-                    curr_time = end.time()
-                } else {
-                    curr_time = std::cmp::max(end.time(), curr_time);
                 }
+                // Not available until end of this event
+                // Only go forwards
+                curr_time = NaiveTime::max(end.time(), curr_time);
             }
 
+            // Still have time left over today.
+            // TODO: combine with logic in the else below
             if curr_time < max {
-                let start_date_time = NaiveDateTime::new(start.date_naive(), curr_time);
-                let start_time = Utc.from_utc_datetime(&start_date_time);
-
-                let end_date_time = NaiveDateTime::new(start.date_naive(), max);
-                let end_time = Utc.from_utc_datetime(&end_date_time);
+                let avail_start = curr.date().and_hms(curr_time.hour(), curr_time.minute(), 0);
+                let avail_end = curr.date().and_hms(max.hour(), max.minute(), 0);
                 day_avail.push(Availability {
-                    start: start_time,
-                    end: end_time,
+                    start: avail_start,
+                    end: avail_end,
                 });
             }
 
-            avail.push((dt.date(), day_avail));
+            avail.push((curr.date(), day_avail));
 
             // 12AM next day
-            dt = (dt + Duration::days(1)).date().and_hms(0, 0, 0);
+            curr = (curr + Duration::days(1))
+                .date()
+                .and_hms(min.hour(), min.minute(), 0);
         } else {
             // Add days that are entirely free
-            while dt <= end {
+            // Either before end date or on the end date but before the max time
+            while curr.date() < end.date()
+                || (curr.date() == end.date() && curr.time() < max && curr < end)
+            {
                 // Whole day
-                let end = dt + Duration::days(1);
-                avail.push((dt.date(), vec![Availability { start: dt, end }]));
+                let end = curr + (max - curr.time());
+                avail.push((curr.date(), vec![Availability { start: curr, end }]));
 
-                dt += Duration::days(1);
+                // min next day
+                curr = (curr + Duration::days(1))
+                    .date()
+                    .and_hms(min.hour(), min.minute(), 0);
             }
         }
     }
@@ -188,7 +199,7 @@ pub fn split_availability<T: TimeZone>(
     duration: Duration,
 ) -> Vec<Availability<T>>
 where
-    <T as chrono::TimeZone>::Offset: Copy,
+    <T as TimeZone>::Offset: Copy,
 {
     let mut res = vec![];
 
@@ -208,7 +219,7 @@ where
 
 pub fn merge_overlapping_avails<T: TimeZone>(avails: Vec<Availability<T>>) -> Vec<Availability<T>>
 where
-    <T as chrono::TimeZone>::Offset: Copy,
+    <T as TimeZone>::Offset: Copy,
 {
     let mut res: Vec<Availability<T>> = vec![];
 
@@ -225,4 +236,221 @@ where
     }
 
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::DateTime;
+
+    use super::*;
+
+    #[test]
+    fn test_overlapping_avail() {
+        // Nov 4 12pm - 2pm
+        let avail1 = Availability {
+            start: DateTime::parse_from_rfc3339("2022-11-04T12:00:00-04:00").unwrap(),
+            end: DateTime::parse_from_rfc3339("2022-11-04T14:00:00-04:00").unwrap(),
+        };
+        // Nov 4 2:30pm - 4pm
+        let avail2 = Availability {
+            start: DateTime::parse_from_rfc3339("2022-11-04T14:30:00-04:00").unwrap(),
+            end: DateTime::parse_from_rfc3339("2022-11-04T16:00:00-04:00").unwrap(),
+        };
+        // Nov 4 2:00pm - 4pm
+        let avail3 = Availability {
+            start: DateTime::parse_from_rfc3339("2022-11-04T14:00:00-04:00").unwrap(),
+            end: DateTime::parse_from_rfc3339("2022-11-04T16:00:00-04:00").unwrap(),
+        };
+        assert!(!avail1.overlaps(&avail2));
+        assert!(avail1.overlaps(&avail3));
+    }
+
+    #[test]
+    fn test_merge_overlapping_avails() {
+        let avails = vec![
+            // Nov 4 12pm - 2pm
+            Availability {
+                start: DateTime::parse_from_rfc3339("2022-11-04T12:00:00-04:00").unwrap(),
+                end: DateTime::parse_from_rfc3339("2022-11-04T14:00:00-04:00").unwrap(),
+            },
+            // Nov 4 2:30pm - 4pm
+            Availability {
+                start: DateTime::parse_from_rfc3339("2022-11-04T14:30:00-04:00").unwrap(),
+                end: DateTime::parse_from_rfc3339("2022-11-04T16:00:00-04:00").unwrap(),
+            },
+            // Nov 4 4pm - 5pm
+            Availability {
+                start: DateTime::parse_from_rfc3339("2022-11-04T16:00:00-04:00").unwrap(),
+                end: DateTime::parse_from_rfc3339("2022-11-04T17:00:00-04:00").unwrap(),
+            },
+            // Nov 4 4:30pm - 6pm
+            Availability {
+                start: DateTime::parse_from_rfc3339("2022-11-04T16:30:00-04:00").unwrap(),
+                end: DateTime::parse_from_rfc3339("2022-11-04T18:00:00-04:00").unwrap(),
+            },
+        ];
+
+        let merged_avails = merge_overlapping_avails(avails);
+        assert_eq!(merged_avails.len(), 2);
+    }
+
+    fn create_utc_datetime(dt_str: &str) -> DateTime<Utc> {
+        let datetime_fmt = "%m-%d-%Y %H:%M";
+        DateTime::<Utc>::from_utc(
+            NaiveDateTime::parse_from_str(dt_str, datetime_fmt).unwrap(),
+            Utc,
+        )
+    }
+
+    fn create_event(start: &str, end: &str) -> Event {
+        let event_id = "id";
+        let event_name = "name";
+        Event {
+            id: event_id.to_string(),
+            name: event_name.to_string(),
+            // 12 PM
+            start: create_utc_datetime(start),
+            // 2 PM
+            end: create_utc_datetime(end),
+        }
+    }
+
+    #[test]
+    fn test_get_availability() {
+        let events = vec![
+            // 12pm - 2pm
+            create_event("10-05-2022 12:00", "10-05-2022 14:00"),
+            // 3:30pm - 4pm
+            create_event("10-05-2022 15:30", "10-05-2022 16:00"),
+            // 4pm - 6pm
+            create_event("10-05-2022 16:00", "10-05-2022 18:00"),
+            // 7pm - 9pm (outside min-max window)
+            create_event("10-05-2022 19:00", "10-05-2022 21:00"),
+            // Next day, 5:30am to 7am (outside min-max window)
+            create_event("10-06-2022 05:30", "10-06-2022 07:00"),
+            // Next day, 8:30am to 12pm
+            create_event("10-06-2022 08:30", "10-06-2022 12:00"),
+        ];
+        let start = create_utc_datetime("10-05-2022 00:00");
+        let end = create_utc_datetime("10-07-2022 00:00");
+        let min = NaiveTime::from_hms(9, 0, 0);
+        let max = NaiveTime::from_hms(17, 0, 0);
+
+        let avails = get_free_time(events, start, end, min, max);
+
+        assert_eq!(avails.len(), 2);
+        let mut day_avails = &avails.get(0).unwrap().1;
+        assert_eq!(day_avails.len(), 2);
+
+        assert_eq!(
+            *day_avails.get(0).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-05-2022 09:00"),
+                end: create_utc_datetime("10-05-2022 12:00"),
+            }
+        );
+        assert_eq!(
+            *day_avails.get(1).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-05-2022 14:00"),
+                end: create_utc_datetime("10-05-2022 15:30"),
+            }
+        );
+
+        day_avails = &avails.get(1).unwrap().1;
+        assert_eq!(day_avails.len(), 1);
+        assert_eq!(
+            *day_avails.get(0).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-06-2022 12:00"),
+                end: create_utc_datetime("10-06-2022 17:00"),
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_availability_no_events() {
+        let events = vec![];
+        let start = create_utc_datetime("10-05-2022 00:00");
+        let end = create_utc_datetime("10-07-2022 00:00");
+        let min = NaiveTime::from_hms(9, 0, 0);
+        let max = NaiveTime::from_hms(17, 0, 0);
+
+        let avails = get_free_time(events, start, end, min, max);
+
+        assert_eq!(avails.len(), 2);
+        let mut day_avails = &avails.get(0).unwrap().1;
+        assert_eq!(day_avails.len(), 1);
+        assert_eq!(
+            *day_avails.get(0).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-05-2022 09:00"),
+                end: create_utc_datetime("10-05-2022 17:00"),
+            }
+        );
+
+        day_avails = &avails.get(1).unwrap().1;
+        assert_eq!(day_avails.len(), 1);
+        assert_eq!(
+            *day_avails.get(0).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-06-2022 09:00"),
+                end: create_utc_datetime("10-06-2022 17:00"),
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_availability_start_with_full_day() {
+        let events = vec![
+            // No events on start day
+
+            // 12pm - 2pm
+            create_event("10-06-2022 12:00", "10-06-2022 14:00"),
+            // 3:30pm - 4pm
+            create_event("10-06-2022 15:30", "10-06-2022 16:00"),
+        ];
+        let start = create_utc_datetime("10-05-2022 00:00");
+        let end = create_utc_datetime("10-07-2022 00:00");
+        let min = NaiveTime::from_hms(9, 0, 0);
+        let max = NaiveTime::from_hms(17, 0, 0);
+
+        let avails = get_free_time(events, start, end, min, max);
+
+        assert_eq!(avails.len(), 2);
+        let mut day_avails = &avails.get(0).unwrap().1;
+        assert_eq!(day_avails.len(), 1);
+        assert_eq!(
+            *day_avails.get(0).unwrap(),
+            // Full day
+            Availability {
+                start: create_utc_datetime("10-05-2022 09:00"),
+                end: create_utc_datetime("10-05-2022 17:00"),
+            }
+        );
+
+        day_avails = &avails.get(1).unwrap().1;
+        assert_eq!(day_avails.len(), 3);
+        assert_eq!(
+            *day_avails.get(0).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-06-2022 09:00"),
+                end: create_utc_datetime("10-06-2022 12:00"),
+            }
+        );
+        assert_eq!(
+            *day_avails.get(1).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-06-2022 14:00"),
+                end: create_utc_datetime("10-06-2022 15:30"),
+            }
+        );
+        assert_eq!(
+            *day_avails.get(2).unwrap(),
+            Availability {
+                start: create_utc_datetime("10-06-2022 16:00"),
+                end: create_utc_datetime("10-06-2022 17:00"),
+            }
+        );
+    }
 }

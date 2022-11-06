@@ -203,9 +203,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
-                let prev_selected_calendars: Vec<String> = db
+                let prev_unselected_calendars: Vec<String> = db
                     .execute(Box::new(move |conn| {
-                        CalendarModel::get_all_selected(conn, &account_id.to_owned())
+                        CalendarModel::get_all(conn, &account_id.to_owned(), false)
                     }))??
                     .into_iter()
                     .map(|c| c.calendar_id)
@@ -213,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let mut defaults = vec![];
                 for cal in calendars.iter() {
-                    defaults.push(prev_selected_calendars.contains(&cal.id));
+                    defaults.push(!prev_unselected_calendars.contains(&cal.id));
                 }
 
                 let calendar_names: Vec<String> =
@@ -294,7 +294,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let account_id = account.id.unwrap().to_owned();
                 let selected_calendars: Vec<String> = db
                     .execute(Box::new(move |conn| {
-                        CalendarModel::get_all_selected(conn, &account_id)
+                        CalendarModel::get_all(conn, &account_id, true)
                     }))??
                     .into_iter()
                     .map(|c| c.calendar_id)

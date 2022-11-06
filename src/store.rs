@@ -118,26 +118,27 @@ impl CalendarModel {
         Ok(())
     }
 
-    pub fn get_all_selected(
+    pub fn get_all(
         conn: &Connection,
         account_id: &u32,
+        selected: bool,
     ) -> anyhow::Result<Vec<CalendarModel>> {
-        let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where is_selected = true and account_id = ?")?;
-        let prev_selected_calendars: Vec<CalendarModel> = stmt
-            .query_map([account_id], |row| {
+        let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where is_selected = ?1 and account_id = ?2")?;
+        let prev_unselected_calendars: Vec<CalendarModel> = stmt
+            .query_map((selected, account_id), |row| {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 Ok(CalendarModel {
-                    account_id: None,
+                    account_id: Some(account_id.clone()),
                     calendar_id: id,
                     calendar_name: name,
-                    is_selected: true,
+                    is_selected: selected,
                 })
             })?
             .filter_map(|s| s.ok())
             .collect();
 
-        Ok(prev_selected_calendars)
+        Ok(prev_unselected_calendars)
     }
 
     pub fn delete_for_account(conn: &Connection, account_id: &u32) -> anyhow::Result<()> {
