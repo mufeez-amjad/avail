@@ -2,7 +2,7 @@ pub mod google;
 pub mod microsoft;
 
 use async_trait::async_trait;
-use chrono::{prelude::*, Duration};
+use chrono::prelude::*;
 
 pub struct Calendar {
     pub id: String,
@@ -12,7 +12,7 @@ pub struct Calendar {
 
 pub struct Event {
     pub id: String,
-    pub name: String,
+    pub name: Option<String>,
     pub start: DateTime<Local>,
     pub end: DateTime<Local>,
 }

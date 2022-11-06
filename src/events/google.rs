@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use chrono::prelude::*;
+use reqwest::Response;
 use serde::Deserialize;
 use serde_json;
 
 use super::{Calendar, Event, GetResources};
-use crate::oauth::{google::GoogleOauthClient, microsoft::MicrosoftOauthClient};
+use crate::oauth::google::GoogleOauthClient;
 
 #[derive(serde::Deserialize, Clone)]
 struct GoogleCalendar {
@@ -17,7 +18,7 @@ struct GoogleCalendar {
 struct GoogleEvent {
     id: String,
     #[serde(rename(deserialize = "summary"))]
-    name: String,
+    name: Option<String>,
 
     #[serde(deserialize_with = "deserialize_json_time")]
     start: DateTime<Local>,
@@ -31,12 +32,11 @@ where
 {
     let json: serde_json::value::Value = serde_json::value::Value::deserialize(deserializer)?;
     let time_str = json.get("dateTime").expect("datetime").as_str().unwrap();
-    let tz_str = json.get("timeZone").expect("timeZone").as_str().unwrap();
+    let _tz_str = json.get("timeZone").expect("timeZone").as_str().unwrap();
 
     // 2022-10-22T20:30:00.0000000
     let datetime = DateTime::parse_from_rfc3339(time_str)
         .expect(&format!("failed to parse datetime {}", time_str));
-
 
     Ok(datetime.with_timezone(&Local))
 }
@@ -117,36 +117,47 @@ impl GetResources for GoogleAPI {
         let end_time_str = str::replace(&end_time.format("%+").to_string(), "+", "-");
 
         let url = format!(
-            "https://www.googleapis.com/calendar/v3/calendars/{}/events?singleEvents=true&orderBy=startTime&timeMin={}&timeMax={}", 
+            "https://www.googleapis.com/calendar/v3/calendars/{}/events?singleEvents=true&orderBy=startTime&timeMin={}&timeMax={}",
             calendar_id, start_time_str, end_time_str
         );
 
-        let resp: GoogleResponse<GoogleEvent> = reqwest::Client::new()
+        let resp: Response = reqwest::Client::new()
             .get(url)
             .bearer_auth(token)
             .header("Content-Type", "application/json")
             .send()
             .await
-            .unwrap()
-            .json()
-            .await?;
+            .unwrap();
 
-        if let Some(err) = resp.error {
-            return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+        let data: reqwest::Result<GoogleResponse<GoogleEvent>> = resp.json().await;
+
+        match data {
+            Ok(v) => {
+                if let Some(err) = v.error {
+                    return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+                }
+
+                let events = v
+                    .items
+                    .unwrap()
+                    .into_iter()
+                    .map(|e| Event {
+                        id: e.id,
+                        name: e.name,
+                        start: e.start,
+                        end: e.end,
+                    })
+                    .collect();
+
+                Ok(events)
+            }
+            Err(e) => {
+                println!(
+                    "Failed to parse JSON response of calendar events for {}, {}",
+                    calendar_id, e
+                );
+                return Ok(vec![]);
+            }
         }
-
-        let events = resp
-            .items
-            .unwrap()
-            .into_iter()
-            .map(|e| Event {
-                id: e.id,
-                name: e.name,
-                start: e.start,
-                end: e.end,
-            })
-            .collect();
-
-        Ok(events)
     }
 }

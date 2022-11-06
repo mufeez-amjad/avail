@@ -11,7 +11,11 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use regex::Regex;
 use rusqlite::Result;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::task::JoinHandle;
 
+use crate::events::Event;
 use events::{google, microsoft, GetResources};
 use store::{Account, CalendarModel, Model, Platform};
 use util::{get_availability, merge_overlapping_avails, split_availability, Availability};
@@ -288,7 +292,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
             let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
-            let mut events = vec![];
+
+            // Microsoft Graph has 4 concurrent requests limit
+            let semaphore = Arc::new(Semaphore::new(4));
+            let mut tasks: Vec<JoinHandle<anyhow::Result<Vec<Event>>>> = vec![];
 
             for account in accounts {
                 let account_id = account.id.unwrap().to_owned();
@@ -307,40 +314,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             microsoft::refresh_access_token(refresh_token).await;
 
                         for cal_id in selected_calendars {
-                            let mut account_events =
-                                microsoft::MicrosoftGraph::get_calendar_events(
-                                    access_token.to_owned(),
+                            let token = access_token.clone();
+                            let permit = semaphore
+                                .clone()
+                                .acquire_owned()
+                                .await
+                                .expect("unable to acquire permit"); // Acquire a permit
+                            tasks.push(tokio::task::spawn(async move {
+                                let res = microsoft::MicrosoftGraph::get_calendar_events(
+                                    token,
                                     cal_id.to_owned(),
                                     start_time,
                                     end_time,
                                 )
                                 .await?;
-                            events.append(&mut account_events);
+                                drop(permit);
+                                Ok(res)
+                            }));
                         }
                     }
                     Platform::Google => {
                         let refresh_token = store::get_token(&account.name)?;
                         let access_token = google::refresh_access_token(refresh_token).await;
+
                         for cal_id in selected_calendars {
-                            let mut account_events = google::GoogleAPI::get_calendar_events(
-                                access_token.to_owned(),
-                                cal_id.to_owned(),
-                                start_time,
-                                end_time,
-                            )
-                            .await?;
-                            events.append(&mut account_events);
+                            let token = access_token.clone();
+                            tasks.push(tokio::task::spawn(async move {
+                                let res = google::GoogleAPI::get_calendar_events(
+                                    token,
+                                    cal_id.to_owned(),
+                                    start_time,
+                                    end_time,
+                                )
+                                .await?;
+                                Ok(res)
+                            }));
                         }
                     }
                 }
             }
+
+            let results: Vec<Vec<Event>> = futures::future::join_all(tasks)
+                .await
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .map(Result::unwrap)
+                .collect();
+
+            let events: Vec<Event> = results.into_iter().flatten().collect();
 
             pb.set_message("Computing availabilities...");
 
             let availability = get_availability(events, start_time, end_time, duration);
             let slots: Vec<Availability<Local>> = availability
                 .into_iter()
-                .map(|(d, a)| a)
+                .map(|(_d, a)| a)
                 .flatten()
                 .collect();
 

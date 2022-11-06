@@ -3,7 +3,7 @@ use itertools::Itertools;
 
 use crate::events::Event;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Availability<T: TimeZone>
 where
     <T as TimeZone>::Offset: Copy,
@@ -12,13 +12,9 @@ where
     pub end: DateTime<T>,
 }
 
-impl Availability<Utc> {
-    pub fn to_local(&self) -> Availability<Local> {
-        let res = Availability {
-            start: self.start.with_timezone(&Local),
-            end: self.end.with_timezone(&Local),
-        };
-        res
+impl PartialEq for Availability<Local> {
+    fn eq(&self, other: &Self) -> bool {
+        self.start.eq(&other.start) && self.end.eq(&other.end)
     }
 }
 
@@ -242,7 +238,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use chrono::DateTime;
 
     use super::*;
@@ -299,7 +294,8 @@ mod tests {
 
     fn create_local_datetime(dt_str: &str) -> DateTime<Local> {
         let datetime_fmt = "%m-%d-%Y %H:%M";
-        DateTime::<Local>::from_str(dt_str, datetime_fmt).unwrap()
+        let ndt = NaiveDateTime::parse_from_str(dt_str, datetime_fmt).unwrap();
+        Local.from_local_datetime(&ndt).unwrap()
     }
 
     fn create_event(start: &str, end: &str) -> Event {
@@ -307,7 +303,7 @@ mod tests {
         let event_name = "name";
         Event {
             id: event_id.to_string(),
-            name: event_name.to_string(),
+            name: Some(event_name.to_string()),
             // 12 PM
             start: create_local_datetime(start),
             // 2 PM

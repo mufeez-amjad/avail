@@ -1,12 +1,8 @@
 pub mod google;
 pub mod microsoft;
 
-use oauth2::{basic::BasicClient, TokenResponse};
-use oauth2::{
-    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, Scope, TokenUrl,
-};
-use std::io::{BufRead, BufReader, Write};
+use oauth2::basic::BasicClient;
+use oauth2::{CsrfToken, PkceCodeChallenge, Scope};
 
 pub trait OauthClient {
     fn get_authorization_url(

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use chrono::{prelude::*, Duration};
+use chrono::prelude::*;
+use reqwest::Response;
 use serde::Deserialize;
 use serde_json;
 
@@ -10,16 +11,13 @@ use crate::oauth::microsoft::MicrosoftOauthClient;
 struct GraphCalendar {
     id: String,
     name: String,
-
-    #[serde(default)]
-    selected: bool,
 }
 
 #[derive(serde::Deserialize, Clone)]
 struct GraphEvent {
     id: String,
     #[serde(rename(deserialize = "subject"))]
-    name: String,
+    name: Option<String>,
 
     #[serde(deserialize_with = "deserialize_json_time")]
     start: DateTime<Local>,
@@ -113,32 +111,43 @@ impl GetResources for MicrosoftGraph {
 
         let url = format!("https://graph.microsoft.com/v1.0/me/calendars/{}/calendarView?startDateTime={}&endDateTime={}", calendar_id, start_time_str, end_time_str);
 
-        let resp: GraphResponse<GraphEvent> = reqwest::Client::new()
+        let resp: Response = reqwest::Client::new()
             .get(url)
             .bearer_auth(token)
             .header("Content-Type", "application/json")
             .send()
             .await
-            .unwrap()
-            .json()
-            .await?;
+            .unwrap();
 
-        if let Some(err) = resp.error {
-            return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+        let data: reqwest::Result<GoogleResponse<GoogleEvent>> = resp.json().await;
+
+        match data {
+            Ok(v) => {
+                if let Some(err) = v.error {
+                    return Err(anyhow::anyhow!("{}: {}", err.code, err.message));
+                }
+
+                let events = v
+                    .items
+                    .unwrap()
+                    .into_iter()
+                    .map(|e| Event {
+                        id: e.id,
+                        name: e.name,
+                        start: e.start,
+                        end: e.end,
+                    })
+                    .collect();
+
+                Ok(events)
+            }
+            Err(e) => {
+                println!(
+                    "Failed to parse JSON response of calendar events for {}, {}",
+                    calendar_id, e
+                );
+                return Ok(vec![]);
+            }
         }
-
-        let events = resp
-            .value
-            .unwrap()
-            .into_iter()
-            .map(|e| Event {
-                id: e.id,
-                name: e.name,
-                start: e.start,
-                end: e.end,
-            })
-            .collect();
-
-        Ok(events)
     }
 }

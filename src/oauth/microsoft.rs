@@ -3,8 +3,7 @@ use oauth2::{basic::BasicClient, TokenResponse};
 // Alternatively, this can be oauth2::curl::http_client or a custom.
 use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, Scope, TokenUrl,
+    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, TokenUrl,
 };
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -58,7 +57,7 @@ impl MicrosoftOauthClient {
     }
 
     pub async fn get_authorization_code(&self) -> (String, String) {
-        let (authorize_url, csrf_state, pkce_code_verifier) =
+        let (authorize_url, _csrf_state, pkce_code_verifier) =
             self.inner.get_authorization_url(vec![
                 "https://graph.microsoft.com/Calendars.Read",
                 "https://graph.microsoft.com/User.Read",
@@ -75,7 +74,7 @@ impl MicrosoftOauthClient {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
                 let code;
-                let state;
+                let _state;
                 {
                     let mut reader = BufReader::new(&stream);
 
@@ -106,14 +105,10 @@ impl MicrosoftOauthClient {
                         .unwrap();
 
                     let (_, value) = state_pair;
-                    state = CsrfToken::new(value.into_owned());
+                    _state = CsrfToken::new(value.into_owned());
                 }
 
-                let message = "<html><body>
-                <script type=\"text/javascript\">
-                  window.close() ;
-                </script> 
-                </body></html>";
+                let message = "Go back to your terminal :)";
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
                     message.len(),
