@@ -84,7 +84,6 @@ impl MicrosoftOauthClient {
 
                     let redirect_url = request_line.split_whitespace().nth(1).unwrap();
                     let url = Url::parse(&("http://localhost".to_string() + redirect_url)).unwrap();
-                    println!("{}", url.to_string());
 
                     let code_pair = url.query_pairs().find(|pair| {
                         let &(ref key, _) = pair;
@@ -121,13 +120,6 @@ impl MicrosoftOauthClient {
                     message
                 );
                 stream.write_all(response.as_bytes()).unwrap();
-
-                println!("MS Graph returned the following code:\n{}\n", code.secret());
-                println!(
-                    "MS Graph returned the following state:\n{} (expected `{}`)\n",
-                    state.secret(),
-                    csrf_state.secret()
-                );
 
                 // Exchange the code with a token.
                 let token_result = self

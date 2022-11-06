@@ -101,14 +101,14 @@ enum AccountCommands {
 
 #[derive(Args)]
 struct AccountAdd {
-    /// The name of the account (should be unique)
-    alias: String,
+    /// The email of the account
+    email: String,
 }
 
 #[derive(Args)]
 struct AccountRemove {
-    /// The name of the account to remove
-    alias: String,
+    /// The email of the account to remove
+    email: String,
 }
 
 #[derive(Args)]
@@ -133,16 +133,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match selections[selection] {
                     Platform::Microsoft => {
                         let (_, refresh_token) = microsoft::get_authorization_code().await;
-                        store::store_token(&cmd.alias, &refresh_token)?;
+                        store::store_token(&cmd.email, &refresh_token)?;
                     }
                     Platform::Google => {
                         let (_, refresh_token) = google::get_authorization_code().await;
-                        store::store_token(&cmd.alias, &refresh_token)?;
+                        store::store_token(&cmd.email, &refresh_token)?;
                     }
                 }
 
                 let account = Account {
-                    name: cmd.alias.to_owned(),
+                    name: cmd.email.to_owned(),
                     platform: Some(selections[selection]),
                     id: None,
                 };
@@ -153,14 +153,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if Confirm::with_theme(&ColorfulTheme::default())
                     .with_prompt(format!(
                         "Do you want to delete the account \"{}\"?",
-                        cmd.alias
+                        cmd.email
                     ))
                     .interact()
                     .unwrap()
                 {
-                    store::delete_token(&cmd.alias)?;
+                    store::delete_token(&cmd.email)?;
                     let account = Account {
-                        name: cmd.alias.to_owned(),
+                        name: cmd.email.to_owned(),
                         id: None,
                         platform: None,
                     };
@@ -337,12 +337,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             pb.set_message("Computing availabilities...");
 
-            let availability = get_availability(events, duration);
+            let availability = get_availability(events, start_time, end_time, duration);
             let slots: Vec<Availability<Local>> = availability
                 .into_iter()
                 .map(|(d, a)| a)
                 .flatten()
-                .map(|a| a.to_local())
                 .collect();
 
             pb.finish_with_message("Computed availabilities.");

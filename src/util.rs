@@ -14,10 +14,11 @@ where
 
 impl Availability<Utc> {
     pub fn to_local(&self) -> Availability<Local> {
-        Availability {
-            start: DateTime::from(self.start),
-            end: DateTime::from(self.end),
-        }
+        let res = Availability {
+            start: self.start.with_timezone(&Local),
+            end: self.end.with_timezone(&Local),
+        };
+        res
     }
 }
 
@@ -64,12 +65,12 @@ where
 
 pub fn get_free_time(
     mut events: Vec<Event>,
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
     min: NaiveTime,
     max: NaiveTime,
-) -> Vec<(Date<Utc>, Vec<Availability<Utc>>)> {
-    let mut avail: Vec<(Date<Utc>, Vec<Availability<Utc>>)> = vec![];
+) -> Vec<(Date<Local>, Vec<Availability<Local>>)> {
+    let mut avail: Vec<(Date<Local>, Vec<Availability<Local>>)> = vec![];
     let duration = 30;
 
     events.sort_by_key(|e| e.start);
@@ -80,6 +81,7 @@ pub fn get_free_time(
 
     // Start at start day and min time
     let mut curr = start.date().and_hms(min.hour(), min.minute(), 0);
+    curr = DateTime::max(start, curr);
 
     while curr < end {
         let day = iter.next();
@@ -169,10 +171,10 @@ pub fn get_free_time(
 
 pub fn get_availability(
     events: Vec<Event>,
+    start_time: DateTime<Local>,
+    end_time: DateTime<Local>,
     duration: Duration,
-) -> Vec<(Date<Utc>, Vec<Availability<Utc>>)> {
-    let start_time = Utc::now();
-    let end_time = start_time + Duration::days(7);
+) -> Vec<(Date<Local>, Vec<Availability<Local>>)> {
     let min = NaiveTime::from_hms(9, 0, 0);
     let max = NaiveTime::from_hms(17, 0, 0);
 
@@ -240,6 +242,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use chrono::DateTime;
 
     use super::*;
@@ -294,12 +297,9 @@ mod tests {
         assert_eq!(merged_avails.len(), 2);
     }
 
-    fn create_utc_datetime(dt_str: &str) -> DateTime<Utc> {
+    fn create_local_datetime(dt_str: &str) -> DateTime<Local> {
         let datetime_fmt = "%m-%d-%Y %H:%M";
-        DateTime::<Utc>::from_utc(
-            NaiveDateTime::parse_from_str(dt_str, datetime_fmt).unwrap(),
-            Utc,
-        )
+        DateTime::<Local>::from_str(dt_str, datetime_fmt).unwrap()
     }
 
     fn create_event(start: &str, end: &str) -> Event {
@@ -309,9 +309,9 @@ mod tests {
             id: event_id.to_string(),
             name: event_name.to_string(),
             // 12 PM
-            start: create_utc_datetime(start),
+            start: create_local_datetime(start),
             // 2 PM
-            end: create_utc_datetime(end),
+            end: create_local_datetime(end),
         }
     }
 
@@ -331,8 +331,8 @@ mod tests {
             // Next day, 8:30am to 12pm
             create_event("10-06-2022 08:30", "10-06-2022 12:00"),
         ];
-        let start = create_utc_datetime("10-05-2022 00:00");
-        let end = create_utc_datetime("10-07-2022 00:00");
+        let start = create_local_datetime("10-05-2022 00:00");
+        let end = create_local_datetime("10-07-2022 00:00");
         let min = NaiveTime::from_hms(9, 0, 0);
         let max = NaiveTime::from_hms(17, 0, 0);
 
@@ -345,15 +345,15 @@ mod tests {
         assert_eq!(
             *day_avails.get(0).unwrap(),
             Availability {
-                start: create_utc_datetime("10-05-2022 09:00"),
-                end: create_utc_datetime("10-05-2022 12:00"),
+                start: create_local_datetime("10-05-2022 09:00"),
+                end: create_local_datetime("10-05-2022 12:00"),
             }
         );
         assert_eq!(
             *day_avails.get(1).unwrap(),
             Availability {
-                start: create_utc_datetime("10-05-2022 14:00"),
-                end: create_utc_datetime("10-05-2022 15:30"),
+                start: create_local_datetime("10-05-2022 14:00"),
+                end: create_local_datetime("10-05-2022 15:30"),
             }
         );
 
@@ -362,8 +362,8 @@ mod tests {
         assert_eq!(
             *day_avails.get(0).unwrap(),
             Availability {
-                start: create_utc_datetime("10-06-2022 12:00"),
-                end: create_utc_datetime("10-06-2022 17:00"),
+                start: create_local_datetime("10-06-2022 12:00"),
+                end: create_local_datetime("10-06-2022 17:00"),
             }
         );
     }
@@ -371,8 +371,8 @@ mod tests {
     #[test]
     fn test_get_availability_no_events() {
         let events = vec![];
-        let start = create_utc_datetime("10-05-2022 00:00");
-        let end = create_utc_datetime("10-07-2022 00:00");
+        let start = create_local_datetime("10-05-2022 00:00");
+        let end = create_local_datetime("10-07-2022 00:00");
         let min = NaiveTime::from_hms(9, 0, 0);
         let max = NaiveTime::from_hms(17, 0, 0);
 
@@ -384,8 +384,8 @@ mod tests {
         assert_eq!(
             *day_avails.get(0).unwrap(),
             Availability {
-                start: create_utc_datetime("10-05-2022 09:00"),
-                end: create_utc_datetime("10-05-2022 17:00"),
+                start: create_local_datetime("10-05-2022 09:00"),
+                end: create_local_datetime("10-05-2022 17:00"),
             }
         );
 
@@ -394,8 +394,8 @@ mod tests {
         assert_eq!(
             *day_avails.get(0).unwrap(),
             Availability {
-                start: create_utc_datetime("10-06-2022 09:00"),
-                end: create_utc_datetime("10-06-2022 17:00"),
+                start: create_local_datetime("10-06-2022 09:00"),
+                end: create_local_datetime("10-06-2022 17:00"),
             }
         );
     }
@@ -410,8 +410,8 @@ mod tests {
             // 3:30pm - 4pm
             create_event("10-06-2022 15:30", "10-06-2022 16:00"),
         ];
-        let start = create_utc_datetime("10-05-2022 00:00");
-        let end = create_utc_datetime("10-07-2022 00:00");
+        let start = create_local_datetime("10-05-2022 00:00");
+        let end = create_local_datetime("10-07-2022 00:00");
         let min = NaiveTime::from_hms(9, 0, 0);
         let max = NaiveTime::from_hms(17, 0, 0);
 
@@ -424,8 +424,8 @@ mod tests {
             *day_avails.get(0).unwrap(),
             // Full day
             Availability {
-                start: create_utc_datetime("10-05-2022 09:00"),
-                end: create_utc_datetime("10-05-2022 17:00"),
+                start: create_local_datetime("10-05-2022 09:00"),
+                end: create_local_datetime("10-05-2022 17:00"),
             }
         );
 
@@ -434,22 +434,22 @@ mod tests {
         assert_eq!(
             *day_avails.get(0).unwrap(),
             Availability {
-                start: create_utc_datetime("10-06-2022 09:00"),
-                end: create_utc_datetime("10-06-2022 12:00"),
+                start: create_local_datetime("10-06-2022 09:00"),
+                end: create_local_datetime("10-06-2022 12:00"),
             }
         );
         assert_eq!(
             *day_avails.get(1).unwrap(),
             Availability {
-                start: create_utc_datetime("10-06-2022 14:00"),
-                end: create_utc_datetime("10-06-2022 15:30"),
+                start: create_local_datetime("10-06-2022 14:00"),
+                end: create_local_datetime("10-06-2022 15:30"),
             }
         );
         assert_eq!(
             *day_avails.get(2).unwrap(),
             Availability {
-                start: create_utc_datetime("10-06-2022 16:00"),
-                end: create_utc_datetime("10-06-2022 17:00"),
+                start: create_local_datetime("10-06-2022 16:00"),
+                end: create_local_datetime("10-06-2022 17:00"),
             }
         );
     }

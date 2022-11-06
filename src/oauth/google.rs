@@ -78,7 +78,6 @@ impl GoogleOauthClient {
 
                     let redirect_url = request_line.split_whitespace().nth(1).unwrap();
                     let url = Url::parse(&("http://localhost".to_string() + redirect_url)).unwrap();
-                    println!("{}", url.to_string());
 
                     let code_pair = url.query_pairs().find(|pair| {
                         let &(ref key, _) = pair;
@@ -135,7 +134,6 @@ impl GoogleOauthClient {
         let inner = token.unwrap();
         let access_token = inner.access_token().secret().to_owned();
         let refresh_token = inner.refresh_token().unwrap().secret().to_owned();
-        println!("access={}, refresh={}", access_token, refresh_token);
 
         (access_token, refresh_token)
     }
