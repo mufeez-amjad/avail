@@ -32,7 +32,11 @@ struct Cli {
     #[arg(short, long, value_parser = parse_datetime)]
     end: Option<DateTime<Local>>,
 
-    /// Duration for availability window (default 30 minutes)
+    /// Duration of search window, specify with <int>(w|d|h|m) (default 1w)
+    #[arg(short, long, value_parser = parse_duration)]
+    window: Option<Duration>,
+
+    /// Duration for availability window (default 30m)
     #[arg(short, long, value_parser = parse_duration)]
     duration: Option<Duration>,
 
@@ -57,7 +61,7 @@ fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
 fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
     let duration_str: String = arg.to_string();
 
-    let re = Regex::new(r"([0-9]*)(h|m)").unwrap();
+    let re = Regex::new(r"([0-9]*)(w|d|h|m)").unwrap();
     let caps = re.captures(&duration_str).unwrap();
 
     let group_1 = caps.get(1);
@@ -66,12 +70,14 @@ fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
     if group_1.is_none() || group_2.is_none() {
         Err(anyhow::anyhow!("Failed to parse duration."))
     } else {
-        let num = group_1.unwrap().as_str().parse::<u32>()?;
+        let num = group_1.unwrap().as_str().parse::<i64>()?;
         let unit = group_2.unwrap().as_str();
 
         match unit {
-            "h" => Ok(Duration::hours(num.into())),
-            "m" => Ok(Duration::minutes(num.into())),
+            "w" => Ok(Duration::weeks(num)),
+            "d" => Ok(Duration::days(num)),
+            "h" => Ok(Duration::hours(num)),
+            "m" => Ok(Duration::minutes(num)),
             _ => Err(anyhow::anyhow!("Unsupported duration unit")),
         }
     }
@@ -81,6 +87,7 @@ fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
 enum Commands {
     /// Manages OAuth accounts (Microsoft Outlook and Google Calendar)
     Account(AccountCmd),
+    /// Refreshes calendar cache for added accounts
     Calendar(CalendarCmd),
 }
 
@@ -119,7 +126,7 @@ struct AccountRemove {
 struct AccountList {}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let db = store::Store::new("./db.db3");
 
@@ -257,23 +264,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => {
-            let start_time = if let Some(start) = cli.start {
-                start
-            } else {
-                Local::now()
-            };
+            let start_time = cli.start.unwrap_or(Local::now());
 
             let end_time = if let Some(end) = cli.end {
                 end
             } else {
-                start_time + Duration::days(7)
+                let window = cli.window.unwrap_or(Duration::days(7));
+                start_time + window
             };
 
-            let duration = if let Some(d) = cli.duration {
-                d
-            } else {
-                Duration::minutes(30)
-            };
+            if end_time < start_time {
+                return Err(anyhow::anyhow!("end time cannot be before start time"));
+            }
+
+            if cli.end.is_some() && cli.window.is_some() {
+                println!(
+                    "{}",
+                    "Specified both end and window options, using end.\n"
+                        .bold()
+                        .red()
+                );
+            }
+
+            let duration = cli.duration.unwrap_or(Duration::minutes(30));
 
             println!(
                 "Finding availability between {} and {}\n",
@@ -365,7 +378,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             pb.set_message("Computing availabilities...");
 
-            let availability = get_availability(events, start_time, end_time, duration);
+            let availability = get_availability(events, start_time, end_time, duration)?;
             let slots: Vec<Availability<Local>> = availability
                 .into_iter()
                 .map(|(_d, a)| a)
@@ -389,11 +402,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|i| slots.get(i).unwrap())
                 .collect();
 
+            // (day, day_avails)
             let days = selected_slots.into_iter().group_by(|e| (e.start.date()));
 
             let mut iter = days.into_iter().peekable();
 
-            let mut selected: Vec<&Availability<Local>> = vec![];
+            let mut selected: Vec<Availability<Local>> = vec![];
 
             while iter.peek().is_some() {
                 let i = iter.next();
@@ -411,9 +425,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .interact()
                     .unwrap();
 
-                let mut selected_windows: Vec<&Availability<Local>> = selection
+                let mut selected_windows: Vec<Availability<Local>> = selection
                     .into_iter()
-                    .map(|i| slots.get(i).unwrap())
+                    .map(|i| windows.get(i).unwrap().clone())
                     .collect();
                 selected.append(&mut selected_windows);
             }
@@ -429,7 +443,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let i = iter.next();
                 let (day, avails) = i.unwrap();
 
-                println!("{}", day.format("%b %d %Y"));
+                println!("{}", day.format("%a %b %d %Y"));
                 for avail in avails {
                     println!(
                         "- {} to {}",

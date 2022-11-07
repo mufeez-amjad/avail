@@ -1,4 +1,4 @@
-use chrono::{prelude::*, Duration};
+use chrono::{prelude::*, Duration, DurationRound};
 use itertools::Itertools;
 
 use crate::events::Event;
@@ -33,7 +33,7 @@ impl std::fmt::Display for Availability<Local> {
             duration_str.push_str(&format!("{}m", duration.num_minutes()));
         }
 
-        let day = self.start.format("%b %d %Y");
+        let day = self.start.format("%a %b %d");
         write!(
             f,
             "{} - {} to {} ({})",
@@ -65,7 +65,7 @@ pub fn get_free_time(
     end: DateTime<Local>,
     min: NaiveTime,
     max: NaiveTime,
-) -> Vec<(Date<Local>, Vec<Availability<Local>>)> {
+) -> anyhow::Result<Vec<(Date<Local>, Vec<Availability<Local>>)>> {
     let mut avail: Vec<(Date<Local>, Vec<Availability<Local>>)> = vec![];
     let duration = 30;
 
@@ -77,6 +77,9 @@ pub fn get_free_time(
 
     // Start at start day and min time
     let mut curr = start.date().and_hms(min.hour(), min.minute(), 0);
+    if curr.minute() % 15 != 0 {
+        curr += Duration::minutes((curr.minute() % 15) as i64);
+    }
     curr = DateTime::max(start, curr);
 
     while curr < end {
@@ -104,8 +107,8 @@ pub fn get_free_time(
             let mut curr_time = min;
 
             for event in events {
-                let start = event.start;
-                let end = event.end;
+                let start = event.start.duration_round(Duration::minutes(30))?;
+                let end = event.end.duration_round(Duration::minutes(30))?;
 
                 // Have time before event
                 if curr_time < start.time() {
@@ -115,7 +118,9 @@ pub fn get_free_time(
                             start
                                 .date()
                                 .and_hms(curr_time.hour(), curr_time.minute(), 0);
-                        let avail_end = start;
+                        let avail_end =
+                            DateTime::min(start, curr.date().and_hms(max.hour(), max.minute(), 0));
+
                         day_avail.push(Availability {
                             start: avail_start,
                             end: avail_end,
@@ -162,7 +167,7 @@ pub fn get_free_time(
         }
     }
 
-    avail
+    Ok(avail)
 }
 
 pub fn get_availability(
@@ -170,11 +175,11 @@ pub fn get_availability(
     start_time: DateTime<Local>,
     end_time: DateTime<Local>,
     duration: Duration,
-) -> Vec<(Date<Local>, Vec<Availability<Local>>)> {
+) -> anyhow::Result<Vec<(Date<Local>, Vec<Availability<Local>>)>> {
     let min = NaiveTime::from_hms(9, 0, 0);
     let max = NaiveTime::from_hms(17, 0, 0);
 
-    let free = get_free_time(events, start_time, end_time, min, max);
+    let free = get_free_time(events, start_time, end_time, min, max)?;
 
     // Filter out all windows < duration
     let avails = free
@@ -189,7 +194,7 @@ pub fn get_availability(
         })
         .collect();
 
-    avails
+    Ok(avails)
 }
 
 pub fn split_availability<T: TimeZone>(
@@ -332,7 +337,7 @@ mod tests {
         let min = NaiveTime::from_hms(9, 0, 0);
         let max = NaiveTime::from_hms(17, 0, 0);
 
-        let avails = get_free_time(events, start, end, min, max);
+        let avails = get_free_time(events, start, end, min, max).unwrap();
 
         assert_eq!(avails.len(), 2);
         let mut day_avails = &avails.get(0).unwrap().1;
@@ -372,7 +377,7 @@ mod tests {
         let min = NaiveTime::from_hms(9, 0, 0);
         let max = NaiveTime::from_hms(17, 0, 0);
 
-        let avails = get_free_time(events, start, end, min, max);
+        let avails = get_free_time(events, start, end, min, max).unwrap();
 
         assert_eq!(avails.len(), 2);
         let mut day_avails = &avails.get(0).unwrap().1;
@@ -411,7 +416,7 @@ mod tests {
         let min = NaiveTime::from_hms(9, 0, 0);
         let max = NaiveTime::from_hms(17, 0, 0);
 
-        let avails = get_free_time(events, start, end, min, max);
+        let avails = get_free_time(events, start, end, min, max).unwrap();
 
         assert_eq!(avails.len(), 2);
         let mut day_avails = &avails.get(0).unwrap().1;

@@ -119,7 +119,7 @@ impl GetResources for MicrosoftGraph {
             .await
             .unwrap();
 
-        let data: reqwest::Result<GoogleResponse<GoogleEvent>> = resp.json().await;
+        let data: reqwest::Result<GraphResponse<GraphEvent>> = resp.json().await;
 
         match data {
             Ok(v) => {
@@ -128,7 +128,7 @@ impl GetResources for MicrosoftGraph {
                 }
 
                 let events = v
-                    .items
+                    .value
                     .unwrap()
                     .into_iter()
                     .map(|e| Event {
