@@ -64,9 +64,9 @@ pub async fn get_authorization_code() -> (String, String) {
     token
 }
 
-pub async fn refresh_access_token(refresh_token: String) -> (String, String) {
+pub async fn refresh_access_token(refresh_token: &str) -> (String, String) {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
-    let token = client.refresh_access_token(refresh_token).await;
+    let token = client.refresh_access_token(refresh_token.to_owned()).await;
     token
 }
 
@@ -74,7 +74,7 @@ pub struct MicrosoftGraph {}
 
 #[async_trait]
 impl GetResources for MicrosoftGraph {
-    async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>> {
+    async fn get_calendars(token: &str) -> anyhow::Result<Vec<Calendar>> {
         let resp: GraphResponse<GraphCalendar> = reqwest::Client::new()
             .get("https://graph.microsoft.com/v1.0/me/calendars")
             .bearer_auth(token)
@@ -104,8 +104,8 @@ impl GetResources for MicrosoftGraph {
     }
 
     async fn get_calendar_events(
-        token: String,
-        calendar_id: String,
+        token: &str,
+        calendar_id: &str,
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,
     ) -> anyhow::Result<Vec<Event>> {
@@ -155,8 +155,8 @@ impl GetResources for MicrosoftGraph {
     }
 
     async fn create_event(
-        token: String,
-        calendar_id: String,
+        token: &str,
+        calendar_id: &str,
         title: &str,
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,

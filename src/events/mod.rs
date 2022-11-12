@@ -26,16 +26,16 @@ pub struct Event {
 
 #[async_trait]
 pub trait GetResources {
-    async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>>;
+    async fn get_calendars(token: &str) -> anyhow::Result<Vec<Calendar>>;
     async fn get_calendar_events(
-        token: String,
-        calendar_id: String,
+        token: &str,
+        calendar_id: &str,
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,
     ) -> anyhow::Result<Vec<Event>>;
     async fn create_event(
-        token: String,
-        calendar_id: String,
+        token: &str,
+        calendar_id: &str,
         title: &str,
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,

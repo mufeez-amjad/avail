@@ -3,7 +3,6 @@ use chrono::prelude::*;
 use reqwest::Response;
 use serde::Deserialize;
 use serde_json;
-use std::collections::HashMap;
 
 use super::{Calendar, Event, GetResources};
 use crate::oauth::google::GoogleOauthClient;
@@ -65,14 +64,14 @@ pub async fn get_authorization_code() -> (String, String) {
     token
 }
 
-pub async fn refresh_access_token(refresh_token: String) -> String {
+pub async fn refresh_access_token(refresh_token: &str) -> String {
     let client = GoogleOauthClient::new(
         "174899155202-ijgr4acsm2til0nhcac2lhq9c2dh1ie8.apps.googleusercontent.com",
         "",
         "",
         "",
     );
-    let token = client.refresh_access_token(refresh_token).await;
+    let token = client.refresh_access_token(refresh_token.to_owned()).await;
     token
 }
 
@@ -80,7 +79,7 @@ pub struct GoogleAPI {}
 
 #[async_trait]
 impl GetResources for GoogleAPI {
-    async fn get_calendars(token: String) -> anyhow::Result<Vec<Calendar>> {
+    async fn get_calendars(token: &str) -> anyhow::Result<Vec<Calendar>> {
         let resp: GoogleResponse<GoogleCalendar> = reqwest::Client::new()
             .get("https://www.googleapis.com/calendar/v3/users/me/calendarList")
             .bearer_auth(token)
@@ -110,8 +109,8 @@ impl GetResources for GoogleAPI {
     }
 
     async fn get_calendar_events(
-        token: String,
-        calendar_id: String,
+        token: &str,
+        calendar_id: &str,
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,
     ) -> anyhow::Result<Vec<Event>> {
@@ -164,8 +163,8 @@ impl GetResources for GoogleAPI {
     }
 
     async fn create_event(
-        token: String,
-        calendar_id: String,
+        token: &str,
+        calendar_id: &str,
         title: &str,
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,

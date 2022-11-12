@@ -3,6 +3,8 @@ mod oauth;
 mod store;
 mod util;
 
+use std::sync::Arc;
+
 use chrono::{prelude::*, Duration};
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
@@ -10,15 +12,14 @@ use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use regex::Regex;
-use rusqlite::Result;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
+use tokio::{sync::Semaphore, task::JoinHandle};
 
-use crate::{events::Event, store::PLATFORMS, util::print_availability};
-use events::{google, microsoft, GetResources};
-use store::{Account, CalendarModel, Model, Platform};
-use util::{get_availability, split_availability, Availability};
+use events::{google, microsoft, Event, GetResources};
+use store::{Account, CalendarModel, Model, Platform, PLATFORMS};
+use util::{
+    get_availability, merge_overlapping_avails, print_availability, split_availability,
+    Availability,
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -36,7 +37,7 @@ struct Cli {
     #[arg(short, long, value_parser = parse_duration)]
     window: Option<Duration>,
 
-    /// Duration for availability window (default 30m)
+    /// Duration of availability window, specify with <int>(w|d|h|m) (default 1w)
     #[arg(short, long, value_parser = parse_duration)]
     duration: Option<Duration>,
 
@@ -87,7 +88,7 @@ fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
 enum Commands {
     /// Manages OAuth accounts (Microsoft Outlook and Google Calendar)
     Account(AccountCmd),
-    /// Allows specifying which calendars to use when querying, also refreshes calendar cache for added accounts
+    /// Allows specifying which calendars to use when querying, refreshes calendar cache for added accounts
     Calendars(CalendarsCmd),
 }
 
@@ -205,12 +206,12 @@ async fn main() -> anyhow::Result<()> {
                 let mut calendars = match account.platform.unwrap() {
                     Platform::Microsoft => {
                         let (access_token, _) =
-                            microsoft::refresh_access_token(refresh_token).await;
-                        microsoft::MicrosoftGraph::get_calendars(access_token.to_owned()).await?
+                            microsoft::refresh_access_token(&refresh_token).await;
+                        microsoft::MicrosoftGraph::get_calendars(&access_token).await?
                     }
                     Platform::Google => {
-                        let access_token = google::refresh_access_token(refresh_token).await;
-                        google::GoogleAPI::get_calendars(access_token.to_owned()).await?
+                        let access_token = google::refresh_access_token(&refresh_token).await;
+                        google::GoogleAPI::get_calendars(&access_token).await?
                     }
                 };
 
@@ -322,7 +323,7 @@ async fn main() -> anyhow::Result<()> {
                     Platform::Microsoft => {
                         let refresh_token = store::get_token(&account.name)?;
                         let (access_token, _) =
-                            microsoft::refresh_access_token(refresh_token).await;
+                            microsoft::refresh_access_token(&refresh_token).await;
 
                         for cal_id in selected_calendars {
                             let token = access_token.clone();
@@ -333,8 +334,8 @@ async fn main() -> anyhow::Result<()> {
                                 .expect("unable to acquire permit"); // Acquire a permit
                             tasks.push(tokio::task::spawn(async move {
                                 let res = microsoft::MicrosoftGraph::get_calendar_events(
-                                    token,
-                                    cal_id.to_owned(),
+                                    &token,
+                                    &cal_id,
                                     start_time,
                                     end_time,
                                 )
@@ -346,14 +347,14 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Platform::Google => {
                         let refresh_token = store::get_token(&account.name)?;
-                        let access_token = google::refresh_access_token(refresh_token).await;
+                        let access_token = google::refresh_access_token(&refresh_token).await;
 
                         for cal_id in selected_calendars {
                             let token = access_token.clone();
                             tasks.push(tokio::task::spawn(async move {
                                 let res = google::GoogleAPI::get_calendar_events(
-                                    token,
-                                    cal_id.to_owned(),
+                                    &token,
+                                    &cal_id,
                                     start_time,
                                     end_time,
                                 )
@@ -439,7 +440,7 @@ async fn main() -> anyhow::Result<()> {
                 .interact()
                 .unwrap()
             {
-                print_availability(selected);
+                print_availability(merge_overlapping_avails(selected));
                 return Ok(());
             }
 
@@ -475,10 +476,10 @@ async fn main() -> anyhow::Result<()> {
                     for avail in selected.iter() {
                         let refresh_token = store::get_token(&accounts[selection].name)?;
                         let (access_token, _) =
-                            microsoft::refresh_access_token(refresh_token).await;
+                            microsoft::refresh_access_token(&refresh_token).await;
                         microsoft::MicrosoftGraph::create_event(
-                            access_token.to_owned(),
-                            editable_calendars[selected_calendar].to_owned(),
+                            &access_token,
+                            &editable_calendars[selected_calendar],
                             &event_title,
                             avail.start,
                             avail.end,
@@ -486,10 +487,39 @@ async fn main() -> anyhow::Result<()> {
                         .await?;
                     }
                 }
-                Platform::Google => todo!(),
+                Platform::Google => {
+                    let account_id = accounts[selection].id.unwrap().to_owned();
+                    let editable_calendars: Vec<String> = db
+                        .execute(Box::new(move |conn| {
+                            CalendarModel::get_all_editable(conn, &account_id, true)
+                        }))??
+                        .into_iter()
+                        .map(|c| c.calendar_id)
+                        .collect();
+
+                    let selected_calendar = Select::with_theme(&ColorfulTheme::default())
+                        .with_prompt("Which calendar would you like to add the events to?")
+                        .items(&editable_calendars)
+                        .interact()
+                        .unwrap();
+
+                    for avail in selected.iter() {
+                        let refresh_token = store::get_token(&accounts[selection].name)?;
+                        let (access_token, _) =
+                            microsoft::refresh_access_token(&refresh_token).await;
+                        google::GoogleAPI::create_event(
+                            &access_token,
+                            &editable_calendars[selected_calendar],
+                            &event_title,
+                            avail.start,
+                            avail.end,
+                        )
+                        .await?;
+                    }
+                }
             }
 
-            print_availability(selected);
+            print_availability(merge_overlapping_avails(selected));
         }
     }
 
