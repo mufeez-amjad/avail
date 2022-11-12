@@ -102,7 +102,7 @@ impl GetResources for GoogleAPI {
                 id: c.id,
                 name: c.name,
                 selected: false,
-                can_edit: false, // TODO: update
+                can_edit: true,
             })
             .collect();
         Ok(calendars)

@@ -12,7 +12,7 @@ pub enum Platform {
     Google,
 }
 
-pub const PLATFORMS: [crate::Platform; 2] = [Platform::Google, Platform::Microsoft];
+pub const PLATFORMS: [Platform; 2] = [Platform::Google, Platform::Microsoft];
 
 impl Platform {
     fn as_str(&self) -> &'static str {
