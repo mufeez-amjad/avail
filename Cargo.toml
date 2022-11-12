@@ -6,20 +6,20 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.66"
-keyring = "1"
+async-trait = "0.1.58"
 chrono = "0.4.22"
-oauth2 = "4.2.3"
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
-webbrowser = "0.8.0"
-serde = "1.0.144"
-serde_json = "1.0.87"
+clap = { version = "4.0.18", features = ["derive"] }
+colored = "2.0.0"
 dialoguer = { version = "0.10.2", features = ["fuzzy-select"] }
 futures = "0.3.25"
-itertools = "0.10.5"
-clap = { version = "4.0.18", features = ["derive"] }
-rusqlite = { version = "0.28.0", features = ["bundled"] }
-colored = "2.0.0"
-async-trait = "0.1.58"
-regex = "1.6.0"
 indicatif = "0.17.1"
+itertools = "0.10.5"
+keyring = "1"
+oauth2 = "4.2.3"
+rusqlite = { version = "0.28.0", features = ["bundled"] }
+regex = "1.6.0"
+reqwest = { version = "0.11", features = ["json"] }
+serde = "1.0.144"
+serde_json = "1.0.87"
+tokio = { version = "1", features = ["full"] }
+webbrowser = "0.8.0"

@@ -59,7 +59,7 @@ impl MicrosoftOauthClient {
     pub async fn get_authorization_code(&self) -> (String, String) {
         let (authorize_url, _csrf_state, pkce_code_verifier) =
             self.inner.get_authorization_url(vec![
-                "https://graph.microsoft.com/Calendars.Read",
+                "https://graph.microsoft.com/Calendars.ReadWrite",
                 "https://graph.microsoft.com/User.Read",
                 "offline_access",
             ]); // "https://graph.microsoft.com/Calendars.Write", "https://graph.microsoft.com/User.Read"

@@ -8,6 +8,13 @@ pub struct Calendar {
     pub id: String,
     pub name: String,
     pub selected: bool,
+    pub can_edit: bool,
+}
+
+impl std::fmt::Display for Calendar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
 
 pub struct Event {
@@ -26,4 +33,11 @@ pub trait GetResources {
         start_time: DateTime<Local>,
         end_time: DateTime<Local>,
     ) -> anyhow::Result<Vec<Event>>;
+    async fn create_event(
+        token: String,
+        calendar_id: String,
+        title: &str,
+        start_time: DateTime<Local>,
+        end_time: DateTime<Local>,
+    ) -> anyhow::Result<()>;
 }

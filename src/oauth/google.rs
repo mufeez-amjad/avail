@@ -51,11 +51,9 @@ impl GoogleOauthClient {
     }
 
     pub async fn get_authorization_code(&self) -> (String, String) {
-        let (authorize_url, _csrf_state, pkce_code_verifier) =
-            self.inner.get_authorization_url(vec![
-                "https://www.googleapis.com/auth/calendar",
-                "https://www.googleapis.com/auth/calendar.events.readonly",
-            ]);
+        let (authorize_url, _csrf_state, pkce_code_verifier) = self
+            .inner
+            .get_authorization_url(vec!["https://www.googleapis.com/auth/calendar"]);
 
         let authorize_url_with_offline = format!("{}&access_type=offline", authorize_url);
         println!("Opening: {}", authorize_url_with_offline.to_string());

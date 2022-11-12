@@ -241,6 +241,26 @@ where
     res
 }
 
+pub fn print_availability(avails: Vec<Availability<Local>>) {
+    let avail_days = avails.into_iter().group_by(|e| (e.start.date()));
+
+    let mut iter = avail_days.into_iter().peekable();
+
+    while iter.peek().is_some() {
+        let i = iter.next();
+        let (day, avails) = i.unwrap();
+
+        println!("{}", day.format("%a %b %d %Y"));
+        for avail in avails {
+            println!(
+                "- {} to {}",
+                avail.start.format("%I:%M %p"),
+                avail.end.format("%I:%M %p")
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::DateTime;

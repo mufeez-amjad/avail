@@ -6,7 +6,7 @@ mod util;
 use chrono::{prelude::*, Duration};
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
-use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect, Select};
+use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use regex::Regex;
@@ -15,10 +15,10 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
-use crate::events::Event;
+use crate::{events::Event, store::PLATFORMS, util::print_availability};
 use events::{google, microsoft, GetResources};
 use store::{Account, CalendarModel, Model, Platform};
-use util::{get_availability, merge_overlapping_avails, split_availability, Availability};
+use util::{get_availability, split_availability, Availability};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -87,8 +87,8 @@ fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
 enum Commands {
     /// Manages OAuth accounts (Microsoft Outlook and Google Calendar)
     Account(AccountCmd),
-    /// Refreshes calendar cache for added accounts
-    Calendar(CalendarCmd),
+    /// Allows specifying which calendars to use when querying, also refreshes calendar cache for added accounts
+    Calendars(CalendarsCmd),
 }
 
 #[derive(Args)]
@@ -98,7 +98,7 @@ struct AccountCmd {
 }
 
 #[derive(Args)]
-struct CalendarCmd {}
+struct CalendarsCmd {}
 
 #[derive(Subcommand)]
 enum AccountCommands {
@@ -133,15 +133,15 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Account(account_cmd)) => match &account_cmd.command {
             AccountCommands::Add(cmd) => {
-                let selections = &[Platform::Google, Platform::Microsoft];
-
                 let selection = Select::with_theme(&ColorfulTheme::default())
                     .with_prompt("Which platform would you like to add an account for?")
-                    .items(&selections[..])
+                    .items(&PLATFORMS[..])
                     .interact()
                     .unwrap();
 
-                match selections[selection] {
+                let selected_platform = PLATFORMS[selection];
+
+                match selected_platform {
                     Platform::Microsoft => {
                         let (_, refresh_token) = microsoft::get_authorization_code().await;
                         store::store_token(&cmd.email, &refresh_token)?;
@@ -154,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let account = Account {
                     name: cmd.email.to_owned(),
-                    platform: Some(selections[selection]),
+                    platform: Some(selected_platform),
                     id: None,
                 };
                 db.execute(Box::new(move |conn| account.insert(conn)))??;
@@ -196,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
-        Some(Commands::Calendar(_)) => {
+        Some(Commands::Calendars(_)) => {
             let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
             for account in accounts {
                 let refresh_token = store::get_token(&account.name)?;
@@ -216,7 +216,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let prev_unselected_calendars: Vec<String> = db
                     .execute(Box::new(move |conn| {
-                        CalendarModel::get_all(conn, &account_id.to_owned(), false)
+                        CalendarModel::get_all_selected(conn, &account_id.to_owned(), false)
                     }))??
                     .into_iter()
                     .map(|c| c.calendar_id)
@@ -227,12 +227,9 @@ async fn main() -> anyhow::Result<()> {
                     defaults.push(!prev_unselected_calendars.contains(&cal.id));
                 }
 
-                let calendar_names: Vec<String> =
-                    calendars.iter().map(|cal| cal.name.to_owned()).collect();
-
                 let selected_calendars_idx: Vec<usize> =
                     MultiSelect::with_theme(&ColorfulTheme::default())
-                        .items(&calendar_names)
+                        .items(&calendars)
                         .defaults(&defaults)
                         .with_prompt(format!(
                             "Select the calendars you want to use for {}",
@@ -255,6 +252,7 @@ async fn main() -> anyhow::Result<()> {
                         calendar_id: c.id,
                         calendar_name: c.name,
                         is_selected: c.selected,
+                        can_edit: Some(c.can_edit),
                     })
                     .collect();
 
@@ -314,7 +312,7 @@ async fn main() -> anyhow::Result<()> {
                 let account_id = account.id.unwrap().to_owned();
                 let selected_calendars: Vec<String> = db
                     .execute(Box::new(move |conn| {
-                        CalendarModel::get_all(conn, &account_id, true)
+                        CalendarModel::get_all_selected(conn, &account_id, true)
                     }))??
                     .into_iter()
                     .map(|c| c.calendar_id)
@@ -432,26 +430,66 @@ async fn main() -> anyhow::Result<()> {
                 selected.append(&mut selected_windows);
             }
 
-            let avails: Vec<Availability<Local>> =
-                merge_overlapping_avails(selected.into_iter().map(|a| a.clone()).collect());
-
-            let avail_days = avails.into_iter().group_by(|e| (e.start.date()));
-
-            let mut iter = avail_days.into_iter().peekable();
-
-            while iter.peek().is_some() {
-                let i = iter.next();
-                let (day, avails) = i.unwrap();
-
-                println!("{}", day.format("%a %b %d %Y"));
-                for avail in avails {
-                    println!(
-                        "- {} to {}",
-                        avail.start.format("%I:%M %p"),
-                        avail.end.format("%I:%M %p")
-                    );
-                }
+            if selected.len() == 0 {
+                return Ok(());
             }
+
+            if !Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt("Do you want to add a hold event for your availabilities?")
+                .interact()
+                .unwrap()
+            {
+                print_availability(selected);
+                return Ok(());
+            }
+
+            let event_title: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("What's the name of your event?")
+                .interact_text()?;
+
+            let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+
+            let selection = Select::with_theme(&ColorfulTheme::default())
+                .with_prompt("Which account would you like to create the events under?")
+                .items(&accounts)
+                .interact()
+                .unwrap();
+
+            match accounts[selection].platform.unwrap() {
+                Platform::Microsoft => {
+                    let account_id = accounts[selection].id.unwrap().to_owned();
+                    let editable_calendars: Vec<String> = db
+                        .execute(Box::new(move |conn| {
+                            CalendarModel::get_all_editable(conn, &account_id, true)
+                        }))??
+                        .into_iter()
+                        .map(|c| c.calendar_id)
+                        .collect();
+
+                    let selected_calendar = Select::with_theme(&ColorfulTheme::default())
+                        .with_prompt("Which calendar would you like to add the events to?")
+                        .items(&editable_calendars)
+                        .interact()
+                        .unwrap();
+
+                    for avail in selected.iter() {
+                        let refresh_token = store::get_token(&accounts[selection].name)?;
+                        let (access_token, _) =
+                            microsoft::refresh_access_token(refresh_token).await;
+                        microsoft::MicrosoftGraph::create_event(
+                            access_token.to_owned(),
+                            editable_calendars[selected_calendar].to_owned(),
+                            &event_title,
+                            avail.start,
+                            avail.end,
+                        )
+                        .await?;
+                    }
+                }
+                Platform::Google => todo!(),
+            }
+
+            print_availability(selected);
         }
     }
 

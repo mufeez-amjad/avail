@@ -3,6 +3,7 @@ use chrono::prelude::*;
 use reqwest::Response;
 use serde::Deserialize;
 use serde_json;
+use std::collections::HashMap;
 
 use super::{Calendar, Event, GetResources};
 use crate::oauth::google::GoogleOauthClient;
@@ -102,6 +103,7 @@ impl GetResources for GoogleAPI {
                 id: c.id,
                 name: c.name,
                 selected: false,
+                can_edit: false, // TODO: update
             })
             .collect();
         Ok(calendars)
@@ -160,4 +162,53 @@ impl GetResources for GoogleAPI {
             }
         }
     }
+
+    async fn create_event(
+        token: String,
+        calendar_id: String,
+        title: &str,
+        start_time: DateTime<Local>,
+        end_time: DateTime<Local>,
+    ) -> anyhow::Result<()> {
+        let url = format!(
+            "https://www.googleapis.com/calendar/v3/calendars/{}/events",
+            calendar_id
+        );
+
+        let body = CreateEventBody {
+            summary: title.to_owned(),
+            start: GoogleDateTime {
+                date_time: start_time.to_rfc3339(),
+            },
+            end: GoogleDateTime {
+                date_time: end_time.to_rfc3339(),
+            },
+        };
+
+        let client = reqwest::Client::new();
+        let event: GoogleEvent = client
+            .post(url)
+            .body(serde_json::to_string(&body).unwrap())
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[derive(serde::Serialize)]
+struct CreateEventBody {
+    summary: String,
+    start: GoogleDateTime,
+    end: GoogleDateTime,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleDateTime {
+    date_time: String,
 }

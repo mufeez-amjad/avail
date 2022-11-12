@@ -8,9 +8,11 @@ use super::{Calendar, Event, GetResources};
 use crate::oauth::microsoft::MicrosoftOauthClient;
 
 #[derive(serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct GraphCalendar {
     id: String,
     name: String,
+    can_edit: bool,
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -95,6 +97,7 @@ impl GetResources for MicrosoftGraph {
                 id: c.id,
                 name: c.name,
                 selected: false,
+                can_edit: c.can_edit,
             })
             .collect();
         Ok(calendars)
@@ -150,4 +153,61 @@ impl GetResources for MicrosoftGraph {
             }
         }
     }
+
+    async fn create_event(
+        token: String,
+        calendar_id: String,
+        title: &str,
+        start_time: DateTime<Local>,
+        end_time: DateTime<Local>,
+    ) -> anyhow::Result<()> {
+        let url = format!(
+            "https://graph.microsoft.com/v1.0/me/calendars/{}/events",
+            calendar_id
+        );
+
+        let tz_str = start_time.format("%Z");
+
+        let body = CreateEventBody {
+            subject: title.to_owned(),
+            start: MicrosoftDateTime {
+                date_time: start_time.to_rfc3339(),
+                time_zone: tz_str.to_string(),
+            },
+            end: MicrosoftDateTime {
+                date_time: end_time.to_rfc3339(),
+                time_zone: tz_str.to_string(),
+            },
+        };
+
+        let client = reqwest::Client::new();
+        let event: String = client
+            .post(url)
+            .body(serde_json::to_string(&body).unwrap())
+            .header("Content-Type", "application/json")
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await?;
+
+        println!("{}", event);
+
+        Ok(())
+    }
+}
+
+#[derive(serde::Serialize)]
+struct CreateEventBody {
+    subject: String,
+    start: MicrosoftDateTime,
+    end: MicrosoftDateTime,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MicrosoftDateTime {
+    date_time: String,
+    time_zone: String,
 }

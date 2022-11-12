@@ -1,3 +1,5 @@
+use std::vec;
+
 use rusqlite::Connection;
 
 pub struct Store {
@@ -9,6 +11,8 @@ pub enum Platform {
     Microsoft,
     Google,
 }
+
+pub const PLATFORMS: [crate::Platform; 2] = [Platform::Google, Platform::Microsoft];
 
 impl Platform {
     fn as_str(&self) -> &'static str {
@@ -35,6 +39,12 @@ pub struct Account {
     pub id: Option<u32>,
     pub name: String,
     pub platform: Option<Platform>,
+}
+
+impl std::fmt::Display for Account {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "- {} on {}", self.name, self.platform.unwrap())
+    }
 }
 
 impl Model<Account> for Account {
@@ -88,6 +98,7 @@ pub struct CalendarModel {
     pub calendar_id: String,
     pub calendar_name: String,
     pub is_selected: bool,
+    pub can_edit: Option<bool>,
 }
 
 impl Model<CalendarModel> for CalendarModel {
@@ -106,19 +117,20 @@ impl Model<CalendarModel> for CalendarModel {
 
 impl CalendarModel {
     pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
-        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, calendar_name, is_selected) VALUES (?, ?, ?, ?)")?;
+        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, calendar_name, is_selected, can_edit) VALUES (?, ?, ?, ?, ?)")?;
         for cal in calendars.into_iter() {
             stmt.execute((
                 cal.account_id.unwrap(),
                 cal.calendar_id,
                 cal.calendar_name,
                 cal.is_selected,
+                cal.can_edit.unwrap_or(false),
             ))?;
         }
         Ok(())
     }
 
-    pub fn get_all(
+    pub fn get_all_selected(
         conn: &Connection,
         account_id: &u32,
         selected: bool,
@@ -133,6 +145,31 @@ impl CalendarModel {
                     calendar_id: id,
                     calendar_name: name,
                     is_selected: selected,
+                    can_edit: Some(false),
+                })
+            })?
+            .filter_map(|s| s.ok())
+            .collect();
+
+        Ok(prev_unselected_calendars)
+    }
+
+    pub fn get_all_editable(
+        conn: &Connection,
+        account_id: &u32,
+        can_edit: bool,
+    ) -> anyhow::Result<Vec<CalendarModel>> {
+        let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where can_edit = ?1 and account_id = ?2")?;
+        let prev_unselected_calendars: Vec<CalendarModel> = stmt
+            .query_map((can_edit, account_id), |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                Ok(CalendarModel {
+                    account_id: Some(account_id.clone()),
+                    calendar_id: id,
+                    calendar_name: name,
+                    is_selected: false,
+                    can_edit: Some(can_edit),
                 })
             })?
             .filter_map(|s| s.ok())
@@ -170,6 +207,7 @@ impl Store {
                     calendar_id TEXT NOT NULL,
                     calendar_name TEXT NOT NULL,
                     is_selected BOOLEAN,
+                    can_edit BOOLEAN,
                     PRIMARY KEY (account_id, calendar_id),
                     FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
                 );
