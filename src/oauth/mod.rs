@@ -28,13 +28,9 @@ impl OauthClient for BasicClient {
         // Create a PKCE code verifier and SHA-256 encode it as a code challenge.
         let (pkce_code_challenge, pkce_code_verifier) = PkceCodeChallenge::new_random_sha256();
 
-        let s = scopes
-            .iter()
-            .map(|f| Scope::new(f.to_string()));
+        let s = scopes.iter().map(|f| Scope::new(f.to_string()));
 
-        let auth_request = self
-            .authorize_url(CsrfToken::new_random)
-            .add_scopes(s);
+        let auth_request = self.authorize_url(CsrfToken::new_random).add_scopes(s);
 
         // Generate the authorization URL to which we'll redirect the user.
         let (authorize_url, csrf_state) =

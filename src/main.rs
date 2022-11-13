@@ -4,7 +4,7 @@ mod oauth;
 mod store;
 mod util;
 
-use chrono::{prelude::*, Duration};
+use chrono::{prelude::*, Duration, DurationRound};
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
 use regex::Regex;
@@ -21,13 +21,25 @@ struct Cli {
     #[arg(short, long, value_parser = parse_datetime)]
     end: Option<DateTime<Local>>,
 
+    /// Minimum time for availability in the form of <int>:<int>am/pm (default 9:00am)
+    #[arg(short, long, value_parser = parse_naivetime)]
+    min: Option<NaiveTime>,
+
+    /// Maximum time for availability in the form of <int>:<int>am/pm (default 5:00pm)
+    #[arg(long, value_parser = parse_naivetime)]
+    max: Option<NaiveTime>,
+
     /// Duration of search window, specify with <int>(w|d|h|m) (default 1w)
-    #[arg(short, long, value_parser = parse_duration)]
+    #[arg(long, value_parser = parse_duration)]
     window: Option<Duration>,
 
     /// Duration of availability window, specify with <int>(w|d|h|m) (default 1w)
     #[arg(short, long, value_parser = parse_duration)]
     duration: Option<Duration>,
+
+    /// Create a hold event (default false)
+    #[arg(long, default_value_t = false)]
+    hold_event: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -44,6 +56,12 @@ fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
     } else {
         Err(non_local_d.err().unwrap())
     }
+}
+
+fn parse_naivetime(arg: &str) -> Result<NaiveTime, chrono::ParseError> {
+    let time_str: String = arg.to_string();
+    let naivetime = NaiveTime::parse_from_str(&time_str, "%l:%M%P");
+    naivetime
 }
 
 fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
@@ -126,7 +144,10 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(Commands::Calendars(_)) => commands::refresh_calendars(db).await?,
         _ => {
-            let start_time = cli.start.unwrap_or_else(Local::now);
+            let start_time = cli
+                .start
+                .unwrap_or_else(Local::now)
+                .duration_round(Duration::minutes(30))?;
 
             let end_time = if let Some(end) = cli.end {
                 end
@@ -148,6 +169,9 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
+            let min_time = cli.min.unwrap_or(NaiveTime::from_hms(9, 0, 0));
+            let max_time = cli.max.unwrap_or(NaiveTime::from_hms(7, 0, 0));
+
             let duration = cli.duration.unwrap_or_else(|| Duration::minutes(30));
 
             println!(
@@ -156,7 +180,16 @@ async fn main() -> anyhow::Result<()> {
                 format!("{}", end_time.format("%b %-d %Y")).bold().blue()
             );
 
-            commands::find_availability(db, start_time, end_time, duration).await?
+            commands::find_availability(
+                db,
+                start_time,
+                end_time,
+                min_time,
+                max_time,
+                duration,
+                cli.hold_event,
+            )
+            .await?
         }
     }
 

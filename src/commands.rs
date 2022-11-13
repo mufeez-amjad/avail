@@ -151,7 +151,10 @@ pub async fn find_availability(
     db: Store,
     start_time: DateTime<Local>,
     end_time: DateTime<Local>,
+    min: NaiveTime,
+    max: NaiveTime,
     duration: Duration,
+    create_hold_event: bool,
 ) -> anyhow::Result<()> {
     let m = MultiProgress::new();
     let spinner_style = ProgressStyle::with_template(&"{spinner} {wide_msg}".blue())
@@ -228,11 +231,8 @@ pub async fn find_availability(
 
     pb.set_message("Computing availabilities...");
 
-    let availability = get_availability(events, start_time, end_time, duration)?;
-    let slots: Vec<Availability<Local>> = availability
-        .into_iter()
-        .flat_map(|(_d, a)| a)
-        .collect();
+    let availability = get_availability(events, start_time, end_time, min, max, duration)?;
+    let slots: Vec<Availability<Local>> = availability.into_iter().flat_map(|(_d, a)| a).collect();
 
     pb.finish_with_message("Computed availabilities.");
 
@@ -246,9 +246,7 @@ pub async fn find_availability(
         .interact()
         .unwrap();
 
-    let selected_slots = selection
-        .into_iter()
-        .map(|i| slots.get(i).unwrap());
+    let selected_slots = selection.into_iter().map(|i| slots.get(i).unwrap());
 
     // (day, day_avails)
     let days = selected_slots.group_by(|e| (e.start.date()));
@@ -284,11 +282,7 @@ pub async fn find_availability(
         return Ok(());
     }
 
-    if !Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Do you want to add a hold event for your availabilities?")
-        .interact()
-        .unwrap()
-    {
+    if !create_hold_event {
         print_availability(merge_overlapping_avails(selected));
         return Ok(());
     }

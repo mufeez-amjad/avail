@@ -1,8 +1,8 @@
 use chrono::{prelude::*, Duration, DurationRound};
 use itertools::Itertools;
 
-use std::fmt::Write as _;
 use crate::events::Event;
+use std::fmt::Write as _;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Availability<T: TimeZone>
@@ -66,9 +66,9 @@ pub fn get_free_time(
     end: DateTime<Local>,
     min: NaiveTime,
     max: NaiveTime,
+    duration: Duration,
 ) -> anyhow::Result<Vec<(Date<Local>, Vec<Availability<Local>>)>> {
     let mut avail: Vec<(Date<Local>, Vec<Availability<Local>>)> = vec![];
-    let duration = 30;
 
     events.sort_by_key(|e| e.start);
 
@@ -114,7 +114,7 @@ pub fn get_free_time(
                 // Have time before event
                 if curr_time < start.time() {
                     // Meets requirement of minimum duration
-                    if start.time() - curr_time >= Duration::minutes(duration) && curr_time < max {
+                    if start.time() - curr_time >= duration && curr_time < max {
                         let avail_start =
                             start
                                 .date()
@@ -175,12 +175,11 @@ pub fn get_availability(
     events: Vec<Event>,
     start_time: DateTime<Local>,
     end_time: DateTime<Local>,
+    min: NaiveTime,
+    max: NaiveTime,
     duration: Duration,
 ) -> anyhow::Result<Vec<(Date<Local>, Vec<Availability<Local>>)>> {
-    let min = NaiveTime::from_hms(9, 0, 0);
-    let max = NaiveTime::from_hms(17, 0, 0);
-
-    let free = get_free_time(events, start_time, end_time, min, max)?;
+    let free = get_free_time(events, start_time, end_time, min, max, duration)?;
 
     // Filter out all windows < duration
     let avails = free
