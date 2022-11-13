@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let min_time = cli.min.unwrap_or(NaiveTime::from_hms(9, 0, 0));
-            let max_time = cli.max.unwrap_or(NaiveTime::from_hms(7, 0, 0));
+            let max_time = cli.max.unwrap_or(NaiveTime::from_hms(17, 0, 0));
 
             let duration = cli.duration.unwrap_or_else(|| Duration::minutes(30));
 

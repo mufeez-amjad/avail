@@ -179,7 +179,7 @@ impl GetResources for MicrosoftGraph {
         };
 
         let client = reqwest::Client::new();
-        let event: String = client
+        let _event: String = client
             .post(url)
             .body(serde_json::to_string(&body).unwrap())
             .header("Content-Type", "application/json")
@@ -189,8 +189,6 @@ impl GetResources for MicrosoftGraph {
             .unwrap()
             .text()
             .await?;
-
-        println!("{}", event);
 
         Ok(())
     }

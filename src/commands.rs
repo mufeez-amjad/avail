@@ -282,8 +282,10 @@ pub async fn find_availability(
         return Ok(());
     }
 
+    let merged = merge_overlapping_avails(selected);
+
     if !create_hold_event {
-        print_availability(merge_overlapping_avails(selected));
+        print_availability(merged);
         return Ok(());
     }
 
@@ -298,6 +300,10 @@ pub async fn find_availability(
         .items(&accounts)
         .interact()
         .unwrap();
+
+    // Microsoft Graph has 4 concurrent requests limit
+    let semaphore = Arc::new(Semaphore::new(4));
+    let mut tasks: Vec<JoinHandle<anyhow::Result<()>>> = vec![];
 
     match accounts[selection].platform.unwrap() {
         Platform::Microsoft => {
@@ -326,28 +332,47 @@ pub async fn find_availability(
             pb.set_message("Creating hold events...");
             pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
-            for avail in selected.iter() {
+            for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&accounts[selection].name)?;
                 let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
-                microsoft::MicrosoftGraph::create_event(
-                    &access_token,
-                    &editable_calendars[selected_calendar].id,
-                    &format!("HOLD - {}", event_title),
-                    avail.start,
-                    avail.end,
-                )
-                .await?;
+                let permit = semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("unable to acquire permit"); // Acquire a permit
+                let calendar_id = editable_calendars[selected_calendar].id.to_owned();
+                let title = format!("HOLD - {}", event_title);
+                let start = avail.start.clone();
+                let end = avail.end.clone();
+
+                tasks.push(tokio::task::spawn(async move {
+                    microsoft::MicrosoftGraph::create_event(
+                        &access_token,
+                        &calendar_id,
+                        &title,
+                        start,
+                        end,
+                    )
+                    .await?;
+                    drop(permit);
+                    Ok(())
+                }));
             }
         }
         Platform::Google => {
             let account_id = accounts[selection].id.unwrap().to_owned();
-            let editable_calendars: Vec<String> = db
+            let editable_calendars: Vec<Calendar> = db
                 .execute(Box::new(move |conn| {
                     CalendarModel::get_all_editable(conn, &account_id, true)
                 }))??
                 .into_iter()
-                .map(|c| c.calendar_id)
-                .collect();
+                .map(|c| Calendar {
+                    id: c.calendar_id,
+                    name: c.calendar_name,
+                    selected: c.is_selected,
+                    can_edit: c.can_edit.unwrap(),
+                })
+                .collect_vec();
 
             let selected_calendar = Select::with_theme(&ColorfulTheme::default())
                 .with_prompt("Which calendar would you like to add the events to?")
@@ -360,24 +385,35 @@ pub async fn find_availability(
             pb.set_message("Creating hold events...");
             pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
-            for avail in selected.iter() {
+            for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&accounts[selection].name)?;
                 let access_token = google::refresh_access_token(&refresh_token).await;
-                google::GoogleAPI::create_event(
-                    &access_token,
-                    &editable_calendars[selected_calendar],
-                    &format!("HOLD - {}", event_title),
-                    avail.start,
-                    avail.end,
-                )
-                .await?;
+
+                let calendar_id = editable_calendars[selected_calendar].id.to_owned();
+                let title = format!("HOLD - {}", event_title);
+                let start = avail.start.clone();
+                let end = avail.end.clone();
+
+                tasks.push(tokio::task::spawn(async move {
+                    google::GoogleAPI::create_event(
+                        &access_token,
+                        &calendar_id,
+                        &title,
+                        start,
+                        end,
+                    )
+                    .await?;
+                    Ok(())
+                }));
             }
         }
     }
 
+    futures::future::join_all(tasks).await;
+
     pb.finish_with_message("Created hold events.");
 
-    print_availability(merge_overlapping_avails(selected));
+    print_availability(merged);
 
     Ok(())
 }
