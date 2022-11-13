@@ -51,7 +51,7 @@ pub fn remove_account(db: Store, email: &str) -> anyhow::Result<()> {
         .interact()
         .unwrap()
     {
-        crate::store::delete_token(&email)?;
+        crate::store::delete_token(email)?;
         let account = Account {
             name: email.to_owned(),
             id: None,
@@ -67,7 +67,7 @@ pub fn remove_account(db: Store, email: &str) -> anyhow::Result<()> {
 pub fn list_accounts(db: Store) -> anyhow::Result<()> {
     let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
 
-    if accounts.len() == 0 {
+    if accounts.is_empty() {
         println!("Configured accounts: None");
     } else {
         println!("Configured accounts:");
@@ -100,13 +100,12 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
             }
         };
 
-        let prev_unselected_calendars: Vec<String> = db
+        let mut prev_unselected_calendars = db
             .execute(Box::new(move |conn| {
                 CalendarModel::get_all_selected(conn, &account_id.to_owned(), false)
             }))??
             .into_iter()
-            .map(|c| c.calendar_id)
-            .collect();
+            .map(|c| c.calendar_id);
 
         let mut defaults = vec![];
         for cal in calendars.iter() {
@@ -220,22 +219,19 @@ pub async fn find_availability(
         }
     }
 
-    let results: Vec<Vec<Event>> = futures::future::join_all(tasks)
+    let events: Vec<Event> = futures::future::join_all(tasks)
         .await
         .into_iter()
         .filter_map(|r| r.ok())
-        .map(Result::unwrap)
+        .flat_map(Result::unwrap)
         .collect();
-
-    let events: Vec<Event> = results.into_iter().flatten().collect();
 
     pb.set_message("Computing availabilities...");
 
     let availability = get_availability(events, start_time, end_time, duration)?;
     let slots: Vec<Availability<Local>> = availability
         .into_iter()
-        .map(|(_d, a)| a)
-        .flatten()
+        .flat_map(|(_d, a)| a)
         .collect();
 
     pb.finish_with_message("Computed availabilities.");
@@ -250,13 +246,12 @@ pub async fn find_availability(
         .interact()
         .unwrap();
 
-    let selected_slots: Vec<&Availability<Local>> = selection
+    let selected_slots = selection
         .into_iter()
-        .map(|i| slots.get(i).unwrap())
-        .collect();
+        .map(|i| slots.get(i).unwrap());
 
     // (day, day_avails)
-    let days = selected_slots.into_iter().group_by(|e| (e.start.date()));
+    let days = selected_slots.group_by(|e| (e.start.date()));
 
     let mut iter = days.into_iter().peekable();
 
@@ -266,7 +261,7 @@ pub async fn find_availability(
         let i = iter.next();
         let (day, avails) = i.unwrap();
 
-        let day_slots: Vec<&Availability<Local>> = avails.into_iter().map(|a| a).collect();
+        let day_slots: Vec<&Availability<Local>> = avails.into_iter().collect();
         let windows = split_availability(&day_slots, duration);
 
         let selection = MultiSelect::with_theme(&ColorfulTheme::default())
@@ -280,12 +275,12 @@ pub async fn find_availability(
 
         let mut selected_windows: Vec<Availability<Local>> = selection
             .into_iter()
-            .map(|i| windows.get(i).unwrap().clone())
+            .map(|i| *windows.get(i).unwrap())
             .collect();
         selected.append(&mut selected_windows);
     }
 
-    if selected.len() == 0 {
+    if selected.is_empty() {
         return Ok(());
     }
 

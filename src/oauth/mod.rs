@@ -30,11 +30,11 @@ impl OauthClient for BasicClient {
 
         let s = scopes
             .iter()
-            .map(|f| Scope::new(f.to_string()))
-            .collect::<Vec<_>>();
+            .map(|f| Scope::new(f.to_string()));
+
         let auth_request = self
             .authorize_url(CsrfToken::new_random)
-            .add_scopes(s.into_iter());
+            .add_scopes(s);
 
         // Generate the authorization URL to which we'll redirect the user.
         let (authorize_url, csrf_state) =

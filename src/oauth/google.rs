@@ -56,7 +56,7 @@ impl GoogleOauthClient {
             .get_authorization_url(vec!["https://www.googleapis.com/auth/calendar"]);
 
         let authorize_url_with_offline = format!("{}&access_type=offline", authorize_url);
-        println!("Opening: {}", authorize_url_with_offline.to_string());
+        println!("Opening: {}", authorize_url_with_offline);
         webbrowser::open(authorize_url_with_offline.as_str()).expect("failed to open web browser");
 
         let mut token = None;

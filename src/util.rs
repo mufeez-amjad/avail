@@ -1,6 +1,7 @@
 use chrono::{prelude::*, Duration, DurationRound};
 use itertools::Itertools;
 
+use std::fmt::Write as _;
 use crate::events::Event;
 
 #[derive(Clone, Copy, Debug)]
@@ -22,15 +23,15 @@ impl std::fmt::Display for Availability<Local> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let duration = self.end - self.start;
 
-        let mut duration_str: String = "".to_owned();
+        let mut duration_str = String::new();
 
         if duration.num_hours() >= 1 {
-            duration_str.push_str(&format!("{}h", duration.num_hours()));
+            let _ = write!(duration_str, "{}h", duration.num_hours());
             if duration.num_minutes() % 60 >= 1 {
-                duration_str.push_str(&format!("{}m", duration.num_minutes() % 60));
+                let _ = write!(duration_str, "{}m", duration.num_minutes() % 60);
             }
         } else if duration.num_minutes() >= 1 {
-            duration_str.push_str(&format!("{}m", duration.num_minutes()));
+            let _ = write!(duration_str, "{}m", duration.num_minutes());
         }
 
         let day = self.start.format("%a %b %d");

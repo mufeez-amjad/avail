@@ -60,14 +60,12 @@ struct GraphError {
 
 pub async fn get_authorization_code() -> (String, String) {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
-    let token = client.get_authorization_code().await;
-    token
+    client.get_authorization_code().await
 }
 
 pub async fn refresh_access_token(refresh_token: &str) -> (String, String) {
     let client = MicrosoftOauthClient::new("345ac594-c15f-4904-b9c5-49a29016a8d2", "", "", "");
-    let token = client.refresh_access_token(refresh_token.to_owned()).await;
-    token
+    client.refresh_access_token(refresh_token.to_owned()).await
 }
 
 pub struct MicrosoftGraph {}

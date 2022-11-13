@@ -38,8 +38,7 @@ fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
     let non_local_d = NaiveDate::parse_from_str(&dt_str, "%m/%d/%Y");
     let time = NaiveTime::from_hms(0, 0, 0);
 
-    if non_local_d.is_ok() {
-        let date = non_local_d.unwrap();
+    if let Ok(date) = non_local_d {
         let datetime = NaiveDateTime::new(date, time);
         Ok(Local.from_local_datetime(&datetime).unwrap())
     } else {
@@ -56,11 +55,9 @@ fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
     let group_1 = caps.get(1);
     let group_2 = caps.get(2);
 
-    if group_1.is_none() || group_2.is_none() {
-        Err(anyhow::anyhow!("Failed to parse duration."))
-    } else {
-        let num = group_1.unwrap().as_str().parse::<i64>()?;
-        let unit = group_2.unwrap().as_str();
+    if let (Some(match_1), Some(match_2)) = (group_1, group_2) {
+        let num = match_1.as_str().parse::<i64>()?;
+        let unit = match_2.as_str();
 
         match unit {
             "w" => Ok(Duration::weeks(num)),
@@ -69,6 +66,8 @@ fn parse_duration(arg: &str) -> anyhow::Result<Duration> {
             "m" => Ok(Duration::minutes(num)),
             _ => Err(anyhow::anyhow!("Unsupported duration unit")),
         }
+    } else {
+        Err(anyhow::anyhow!("Failed to parse duration."))
     }
 }
 
@@ -127,12 +126,12 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(Commands::Calendars(_)) => commands::refresh_calendars(db).await?,
         _ => {
-            let start_time = cli.start.unwrap_or(Local::now());
+            let start_time = cli.start.unwrap_or_else(Local::now);
 
             let end_time = if let Some(end) = cli.end {
                 end
             } else {
-                let window = cli.window.unwrap_or(Duration::days(7));
+                let window = cli.window.unwrap_or_else(|| Duration::days(7));
                 start_time + window
             };
 
@@ -149,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
-            let duration = cli.duration.unwrap_or(Duration::minutes(30));
+            let duration = cli.duration.unwrap_or_else(|| Duration::minutes(30));
 
             println!(
                 "Finding availability between {} and {}\n",

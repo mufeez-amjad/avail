@@ -1,5 +1,3 @@
-use std::vec;
-
 use rusqlite::Connection;
 
 pub struct Store {
@@ -101,20 +99,6 @@ pub struct CalendarModel {
     pub can_edit: Option<bool>,
 }
 
-impl Model<CalendarModel> for CalendarModel {
-    fn get(conn: &Connection) -> anyhow::Result<Vec<CalendarModel>> {
-        Ok(vec![])
-    }
-
-    fn insert(&self, conn: &Connection) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn delete(&self, conn: &Connection) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
 impl CalendarModel {
     pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
         let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, calendar_name, is_selected, can_edit) VALUES (?, ?, ?, ?, ?)")?;
@@ -141,7 +125,7 @@ impl CalendarModel {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 Ok(CalendarModel {
-                    account_id: Some(account_id.clone()),
+                    account_id: Some(*account_id),
                     calendar_id: id,
                     calendar_name: name,
                     is_selected: selected,
@@ -165,7 +149,7 @@ impl CalendarModel {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 Ok(CalendarModel {
-                    account_id: Some(account_id.clone()),
+                    account_id: Some(*account_id),
                     calendar_id: id,
                     calendar_name: name,
                     is_selected: false,
@@ -239,7 +223,7 @@ pub fn get_token(user: &str) -> anyhow::Result<String> {
 }
 
 pub fn delete_token(user: &str) -> anyhow::Result<()> {
-    let entry = keyring::Entry::new(SERVICE_NAME, &user);
+    let entry = keyring::Entry::new(SERVICE_NAME, user);
     entry.delete_password()?;
     Ok(())
 }

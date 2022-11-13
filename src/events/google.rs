@@ -36,7 +36,7 @@ where
 
     // 2022-10-22T20:30:00.0000000
     let datetime = DateTime::parse_from_rfc3339(time_str)
-        .expect(&format!("failed to parse datetime {}", time_str));
+        .unwrap_or_else(|_| panic!("failed to parse datetime {}", time_str));
 
     Ok(datetime.with_timezone(&Local))
 }
@@ -60,8 +60,7 @@ pub async fn get_authorization_code() -> (String, String) {
         "",
         "",
     );
-    let token = client.get_authorization_code().await;
-    token
+    client.get_authorization_code().await
 }
 
 pub async fn refresh_access_token(refresh_token: &str) -> String {
@@ -71,8 +70,7 @@ pub async fn refresh_access_token(refresh_token: &str) -> String {
         "",
         "",
     );
-    let token = client.refresh_access_token(refresh_token.to_owned()).await;
-    token
+    client.refresh_access_token(refresh_token.to_owned()).await
 }
 
 pub struct GoogleAPI {}
@@ -185,7 +183,7 @@ impl GetResources for GoogleAPI {
         };
 
         let client = reqwest::Client::new();
-        let event: GoogleEvent = client
+        let _event: GoogleEvent = client
             .post(url)
             .body(serde_json::to_string(&body).unwrap())
             .bearer_auth(token)
