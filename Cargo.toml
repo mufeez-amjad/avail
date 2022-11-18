@@ -10,6 +10,9 @@ async-trait = "0.1.58"
 chrono = "0.4.22"
 clap = { version = "4.0.18", features = ["derive"] }
 colored = "2.0.0"
+console = "0.15.2"
+copypasta = "0.8.1"
+ctrlc = { version = "3.2.3", features = ["termination"] }
 dialoguer = { version = "0.10.2", features = ["fuzzy-select"] }
 futures = "0.3.25"
 indicatif = "0.17.1"

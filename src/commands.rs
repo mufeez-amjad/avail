@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use chrono::{prelude::*, Duration};
 use colored::Colorize;
+use copypasta::{ClipboardContext, ClipboardProvider};
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
@@ -10,7 +11,7 @@ use tokio::{sync::Semaphore, task::JoinHandle};
 use crate::events::{google, microsoft, Calendar, Event, GetResources};
 use crate::store::{Account, CalendarModel, Model, Platform, Store, PLATFORMS};
 use crate::util::{
-    get_availability, merge_overlapping_avails, print_availability, split_availability,
+    format_availability, get_availability, merge_overlapping_avails, split_availability,
     Availability,
 };
 
@@ -285,7 +286,12 @@ pub async fn find_availability(
     let merged = merge_overlapping_avails(selected);
 
     if !create_hold_event {
-        print_availability(merged);
+        let s = format_availability(merged);
+        let mut ctx = ClipboardContext::new().unwrap();
+        print!("{}", s);
+        if ctx.set_contents(s).is_ok() {
+            println!("\nCopied to clipboard.")
+        }
         return Ok(());
     }
 
@@ -413,7 +419,12 @@ pub async fn find_availability(
 
     pb.finish_with_message("Created hold events.");
 
-    print_availability(merged);
+    let s = format_availability(merged);
+    print!("{}", s);
+    let mut ctx = ClipboardContext::new().unwrap();
+    if ctx.set_contents(s).is_ok() {
+        println!("Copied to clipboard.")
+    }
 
     Ok(())
 }

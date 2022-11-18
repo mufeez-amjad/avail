@@ -22,7 +22,7 @@ struct Cli {
     end: Option<DateTime<Local>>,
 
     /// Minimum time for availability in the form of <int>:<int>am/pm (default 9:00am)
-    #[arg(short, long, value_parser = parse_naivetime)]
+    #[arg(long, value_parser = parse_naivetime)]
     min: Option<NaiveTime>,
 
     /// Maximum time for availability in the form of <int>:<int>am/pm (default 5:00pm)
@@ -30,7 +30,7 @@ struct Cli {
     max: Option<NaiveTime>,
 
     /// Duration of search window, specify with <int>(w|d|h|m) (default 1w)
-    #[arg(long, value_parser = parse_duration)]
+    #[arg(short, long, value_parser = parse_duration)]
     window: Option<Duration>,
 
     /// Duration of availability window, specify with <int>(w|d|h|m) (default 1w)
@@ -135,6 +135,12 @@ struct AccountList {}
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let db = store::Store::new("./db.db3");
+
+    // Needed to restore cursor if program exits during dialoguer prompt.
+    ctrlc::set_handler(move || {
+        let term = console::Term::stdout();
+        let _ = term.show_cursor();
+    })?;
 
     match &cli.command {
         Some(Commands::Account(account_cmd)) => match &account_cmd.command {
