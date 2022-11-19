@@ -106,7 +106,7 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
                 CalendarModel::get_all_selected(conn, &account_id.to_owned(), false)
             }))??
             .into_iter()
-            .map(|c| c.calendar_id);
+            .map(|c| c.id);
 
         let mut defaults = vec![];
         for cal in calendars.iter() {
@@ -134,8 +134,8 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
             .into_iter()
             .map(|c| CalendarModel {
                 account_id: account.id,
-                calendar_id: c.id,
-                calendar_name: c.name,
+                id: c.id,
+                name: c.name,
                 is_selected: c.selected,
                 can_edit: Some(c.can_edit),
             })
@@ -156,6 +156,7 @@ pub async fn find_availability(
     max: NaiveTime,
     duration: Duration,
     create_hold_event: bool,
+    include_weekends: bool,
 ) -> anyhow::Result<()> {
     let m = MultiProgress::new();
     let spinner_style = ProgressStyle::with_template(&"{spinner} {wide_msg}".blue())
@@ -180,7 +181,7 @@ pub async fn find_availability(
                 CalendarModel::get_all_selected(conn, &account_id, true)
             }))??
             .into_iter()
-            .map(|c| c.calendar_id)
+            .map(|c| c.id)
             .collect();
 
         match account.platform.unwrap() {
@@ -320,8 +321,8 @@ pub async fn find_availability(
                 }))??
                 .into_iter()
                 .map(|c| Calendar {
-                    id: c.calendar_id,
-                    name: c.calendar_name,
+                    id: c.id,
+                    name: c.name,
                     selected: c.is_selected,
                     can_edit: c.can_edit.unwrap(),
                 })
@@ -373,8 +374,8 @@ pub async fn find_availability(
                 }))??
                 .into_iter()
                 .map(|c| Calendar {
-                    id: c.calendar_id,
-                    name: c.calendar_name,
+                    id: c.id,
+                    name: c.name,
                     selected: c.is_selected,
                     can_edit: c.can_edit.unwrap(),
                 })

@@ -93,20 +93,20 @@ impl Model<Account> for Account {
 
 pub struct CalendarModel {
     pub account_id: Option<u32>,
-    pub calendar_id: String,
-    pub calendar_name: String,
+    pub id: String,
+    pub name: String,
     pub is_selected: bool,
     pub can_edit: Option<bool>,
 }
 
 impl CalendarModel {
     pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
-        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, calendar_id, calendar_name, is_selected, can_edit) VALUES (?, ?, ?, ?, ?)")?;
+        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, id, name, is_selected, can_edit) VALUES (?, ?, ?, ?, ?)")?;
         for cal in calendars.into_iter() {
             stmt.execute((
                 cal.account_id.unwrap(),
-                cal.calendar_id,
-                cal.calendar_name,
+                cal.id,
+                cal.name,
                 cal.is_selected,
                 cal.can_edit.unwrap_or(false),
             ))?;
@@ -119,15 +119,15 @@ impl CalendarModel {
         account_id: &u32,
         selected: bool,
     ) -> anyhow::Result<Vec<CalendarModel>> {
-        let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where is_selected = ?1 and account_id = ?2")?;
+        let mut stmt = conn.prepare("SELECT id, name FROM calendars where is_selected = ?1 and account_id = ?2")?;
         let prev_unselected_calendars: Vec<CalendarModel> = stmt
             .query_map((selected, account_id), |row| {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 Ok(CalendarModel {
                     account_id: Some(*account_id),
-                    calendar_id: id,
-                    calendar_name: name,
+                    id: id,
+                    name: name,
                     is_selected: selected,
                     can_edit: Some(false),
                 })
@@ -143,15 +143,15 @@ impl CalendarModel {
         account_id: &u32,
         can_edit: bool,
     ) -> anyhow::Result<Vec<CalendarModel>> {
-        let mut stmt = conn.prepare("SELECT calendar_id, calendar_name FROM calendars where can_edit = ?1 and account_id = ?2")?;
+        let mut stmt = conn.prepare("SELECT id, name FROM calendars where can_edit = ?1 and account_id = ?2")?;
         let prev_unselected_calendars: Vec<CalendarModel> = stmt
             .query_map((can_edit, account_id), |row| {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 Ok(CalendarModel {
                     account_id: Some(*account_id),
-                    calendar_id: id,
-                    calendar_name: name,
+                    id: id,
+                    name: name,
                     is_selected: false,
                     can_edit: Some(can_edit),
                 })
@@ -188,11 +188,11 @@ impl Store {
             "
                 CREATE TABLE IF NOT EXISTS calendars (
                     account_id  INTEGER NOT NULL,
-                    calendar_id TEXT NOT NULL,
-                    calendar_name TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    name TEXT NOT NULL,
                     is_selected BOOLEAN,
                     can_edit BOOLEAN,
-                    PRIMARY KEY (account_id, calendar_id),
+                    PRIMARY KEY (account_id, id),
                     FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
                 );
             ",

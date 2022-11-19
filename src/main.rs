@@ -33,6 +33,10 @@ struct Cli {
     #[arg(short, long, value_parser = parse_duration)]
     window: Option<Duration>,
 
+    /// Option to include weekends in availability search (default false)
+    #[arg(long, default_value_t = false)]
+    include_weekends: bool,
+
     /// Duration of availability window, specify with <int>(w|d|h|m) (default 1w)
     #[arg(short, long, value_parser = parse_duration)]
     duration: Option<Duration>,
@@ -194,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
                 max_time,
                 duration,
                 cli.hold_event,
+                cli.include_weekends,
             )
             .await?
         }
