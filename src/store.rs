@@ -95,23 +95,53 @@ pub struct CalendarModel {
     pub account_id: Option<u32>,
     pub id: String,
     pub name: String,
-    pub is_selected: bool,
+    pub query: bool,
     pub can_edit: Option<bool>,
+    pub use_for_hold_events: bool,
 }
 
 impl CalendarModel {
     pub fn insert_many(conn: &Connection, calendars: Vec<CalendarModel>) -> anyhow::Result<()> {
-        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, id, name, is_selected, can_edit) VALUES (?, ?, ?, ?, ?)")?;
+        let mut stmt = conn.prepare("INSERT INTO calendars (account_id, id, name, query, can_edit, use_for_hold_events) VALUES (?, ?, ?, ?, ?, ?)")?;
         for cal in calendars.into_iter() {
             stmt.execute((
                 cal.account_id.unwrap(),
                 cal.id,
                 cal.name,
-                cal.is_selected,
+                cal.query,
                 cal.can_edit.unwrap_or(false),
+                cal.use_for_hold_events,
             ))?;
         }
         Ok(())
+    }
+
+    pub fn get_all(conn: &Connection) -> anyhow::Result<Vec<CalendarModel>> {
+        let mut stmt = conn.prepare(
+            "SELECT account_id, id, name, query, can_edit, use_for_hold_events FROM calendars",
+        )?;
+        let prev_unselected_calendars: Vec<CalendarModel> = stmt
+            .query_map((), |row| {
+                let account_id: u32 = row.get(0)?;
+                let id: String = row.get(1)?;
+                let name: String = row.get(2)?;
+                let query: bool = row.get(3)?;
+                let can_edit: bool = row.get(4)?;
+                let use_for_hold_events: bool = row.get(5)?;
+
+                Ok(CalendarModel {
+                    account_id: Some(account_id),
+                    id,
+                    name,
+                    query,
+                    can_edit: Some(can_edit),
+                    use_for_hold_events,
+                })
+            })?
+            .filter_map(|s| s.ok())
+            .collect();
+
+        Ok(prev_unselected_calendars)
     }
 
     pub fn get_all_selected(
@@ -119,7 +149,8 @@ impl CalendarModel {
         account_id: &u32,
         selected: bool,
     ) -> anyhow::Result<Vec<CalendarModel>> {
-        let mut stmt = conn.prepare("SELECT id, name FROM calendars where is_selected = ?1 and account_id = ?2")?;
+        let mut stmt =
+            conn.prepare("SELECT id, name FROM calendars where query = ?1 and account_id = ?2")?;
         let prev_unselected_calendars: Vec<CalendarModel> = stmt
             .query_map((selected, account_id), |row| {
                 let id: String = row.get(0)?;
@@ -128,8 +159,9 @@ impl CalendarModel {
                     account_id: Some(*account_id),
                     id: id,
                     name: name,
-                    is_selected: selected,
+                    query: selected,
                     can_edit: Some(false),
+                    use_for_hold_events: false,
                 })
             })?
             .filter_map(|s| s.ok())
@@ -143,7 +175,8 @@ impl CalendarModel {
         account_id: &u32,
         can_edit: bool,
     ) -> anyhow::Result<Vec<CalendarModel>> {
-        let mut stmt = conn.prepare("SELECT id, name FROM calendars where can_edit = ?1 and account_id = ?2")?;
+        let mut stmt =
+            conn.prepare("SELECT id, name FROM calendars where can_edit = ?1 and account_id = ?2")?;
         let prev_unselected_calendars: Vec<CalendarModel> = stmt
             .query_map((can_edit, account_id), |row| {
                 let id: String = row.get(0)?;
@@ -152,8 +185,9 @@ impl CalendarModel {
                     account_id: Some(*account_id),
                     id: id,
                     name: name,
-                    is_selected: false,
+                    query: false,
                     can_edit: Some(can_edit),
+                    use_for_hold_events: false,
                 })
             })?
             .filter_map(|s| s.ok())
@@ -190,8 +224,9 @@ impl Store {
                     account_id  INTEGER NOT NULL,
                     id TEXT NOT NULL,
                     name TEXT NOT NULL,
-                    is_selected BOOLEAN,
+                    query BOOLEAN,
                     can_edit BOOLEAN,
+                    use_for_hold_events BOOLEAN,
                     PRIMARY KEY (account_id, id),
                     FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
                 );

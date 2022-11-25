@@ -8,11 +8,12 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use tokio::{sync::Semaphore, task::JoinHandle};
 
+use crate::cli::ProgressIndicator;
 use crate::events::{google, microsoft, Calendar, Event, GetResources};
 use crate::store::{Account, CalendarModel, Model, Platform, Store, PLATFORMS};
 use crate::util::{
-    format_availability, get_availability, merge_overlapping_avails, split_availability,
-    Availability,
+    format_availability, merge_overlapping_avails, split_availability, Availability,
+    AvailabilityFinder,
 };
 
 pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
@@ -21,6 +22,8 @@ pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
         .items(&PLATFORMS[..])
         .interact()
         .unwrap();
+
+    // TODO: get client id, secrets
 
     let selected_platform = PLATFORMS[selection];
 
@@ -86,6 +89,14 @@ pub fn list_accounts(db: Store) -> anyhow::Result<()> {
 
 pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
     let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+
+    if accounts.is_empty() {
+        return Err(anyhow::anyhow!(format!(
+            "You must link accounts using the \"{}\" command before fetching calendars.",
+            "accounts add".bold()
+        )));
+    }
+
     for account in accounts {
         let refresh_token = crate::store::get_token(&account.name)?;
 
@@ -136,8 +147,9 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
                 account_id: account.id,
                 id: c.id,
                 name: c.name,
-                is_selected: c.selected,
+                query: c.selected,
                 can_edit: Some(c.can_edit),
+                use_for_hold_events: false,
             })
             .collect();
 
@@ -145,26 +157,55 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
             CalendarModel::insert_many(conn, insert_calendars)
         }))??;
     }
+
+    let mut all_calendars: Vec<Calendar> = db
+        .execute(Box::new(move |conn| CalendarModel::get_all(conn)))??
+        .into_iter()
+        .map(|c| Calendar {
+            account_id: c.account_id.unwrap(),
+            id: c.id,
+            name: c.name,
+            selected: c.query,
+            can_edit: c.can_edit.unwrap_or(false),
+            use_for_hold_events: c.use_for_hold_events,
+        })
+        .collect_vec();
+
+    let mut previous_selected: usize = 0;
+    for (i, calendar) in all_calendars.iter().enumerate() {
+        if calendar.use_for_hold_events {
+            previous_selected = i;
+            break;
+        }
+    }
+
+    let selected_calendar_idx: usize = Select::with_theme(&ColorfulTheme::default())
+        .items(&all_calendars)
+        .default(previous_selected)
+        .with_prompt("Which calendar would you like to use to create hold events?")
+        .interact()?;
+
+    let mut selected_calendar = all_calendars.get_mut(selected_calendar_idx).unwrap();
+    selected_calendar.use_for_hold_events = true;
+
     Ok(())
 }
 
-pub async fn find_availability(
-    db: Store,
-    start_time: DateTime<Local>,
-    end_time: DateTime<Local>,
-    min: NaiveTime,
-    max: NaiveTime,
-    duration: Duration,
-    create_hold_event: bool,
-    include_weekends: bool,
-) -> anyhow::Result<()> {
-    let m = MultiProgress::new();
-    let spinner_style = ProgressStyle::with_template(&"{spinner} {wide_msg}".blue())
-        .unwrap()
-        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈✔");
+pub fn print_and_copy_availability(merged: &Vec<Availability<Local>>) {
+    let s = format_availability(merged);
+    let mut ctx = ClipboardContext::new().unwrap();
+    print!("{}", s);
+    if ctx.set_contents(s).is_ok() {
+        println!("\nCopied to clipboard.")
+    }
+}
 
+pub(crate) async fn find_availability(
+    db: Store,
+    finder: AvailabilityFinder,
+    m: ProgressIndicator,
+) -> anyhow::Result<Vec<Availability<Local>>> {
     let pb = m.add(ProgressBar::new(1));
-    pb.set_style(spinner_style.clone());
     pb.set_message("Retrieving events...");
     pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
@@ -198,7 +239,10 @@ pub async fn find_availability(
                         .expect("unable to acquire permit"); // Acquire a permit
                     tasks.push(tokio::task::spawn(async move {
                         let res = microsoft::MicrosoftGraph::get_calendar_events(
-                            &token, &cal_id, start_time, end_time,
+                            &token,
+                            &cal_id,
+                            finder.start,
+                            finder.end,
                         )
                         .await?;
                         drop(permit);
@@ -214,7 +258,10 @@ pub async fn find_availability(
                     let token = access_token.clone();
                     tasks.push(tokio::task::spawn(async move {
                         let res = google::GoogleAPI::get_calendar_events(
-                            &token, &cal_id, start_time, end_time,
+                            &token,
+                            &cal_id,
+                            finder.start,
+                            finder.end,
                         )
                         .await?;
                         Ok(res)
@@ -233,7 +280,7 @@ pub async fn find_availability(
 
     pb.set_message("Computing availabilities...");
 
-    let availability = get_availability(events, start_time, end_time, min, max, duration)?;
+    let availability = finder.get_availability(events)?;
     let slots: Vec<Availability<Local>> = availability.into_iter().flat_map(|(_d, a)| a).collect();
 
     pb.finish_with_message("Computed availabilities.");
@@ -262,7 +309,7 @@ pub async fn find_availability(
         let (day, avails) = i.unwrap();
 
         let day_slots: Vec<&Availability<Local>> = avails.into_iter().collect();
-        let windows = split_availability(&day_slots, duration);
+        let windows = split_availability(&day_slots, finder.duration);
 
         let selection = MultiSelect::with_theme(&ColorfulTheme::default())
             .with_prompt(format!(
@@ -281,20 +328,21 @@ pub async fn find_availability(
     }
 
     if selected.is_empty() {
-        return Ok(());
+        return Ok(vec![]);
     }
 
     let merged = merge_overlapping_avails(selected);
+    Ok(merged)
+}
 
-    if !create_hold_event {
-        let s = format_availability(merged);
-        let mut ctx = ClipboardContext::new().unwrap();
-        print!("{}", s);
-        if ctx.set_contents(s).is_ok() {
-            println!("\nCopied to clipboard.")
-        }
-        return Ok(());
-    }
+pub(crate) async fn create_hold_events(
+    db: Store,
+    merged: Vec<Availability<Local>>,
+    m: ProgressIndicator,
+) -> anyhow::Result<()> {
+    let pb = m.add(ProgressBar::new(1));
+    pb.set_message("Retrieving events...");
+    pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
     let event_title: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("What's the name of your event?")
@@ -323,8 +371,10 @@ pub async fn find_availability(
                 .map(|c| Calendar {
                     id: c.id,
                     name: c.name,
-                    selected: c.is_selected,
+                    selected: c.query,
                     can_edit: c.can_edit.unwrap(),
+                    use_for_hold_events: false,
+                    account_id: c.account_id.unwrap(),
                 })
                 .collect_vec();
 
@@ -335,7 +385,6 @@ pub async fn find_availability(
                 .unwrap();
 
             let pb = m.add(ProgressBar::new(1));
-            pb.set_style(spinner_style.clone());
             pb.set_message("Creating hold events...");
             pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
@@ -376,8 +425,10 @@ pub async fn find_availability(
                 .map(|c| Calendar {
                     id: c.id,
                     name: c.name,
-                    selected: c.is_selected,
+                    selected: c.query,
                     can_edit: c.can_edit.unwrap(),
+                    account_id: c.account_id.unwrap(),
+                    use_for_hold_events: false,
                 })
                 .collect_vec();
 
@@ -388,7 +439,6 @@ pub async fn find_availability(
                 .unwrap();
 
             let pb = m.add(ProgressBar::new(1));
-            pb.set_style(spinner_style.clone());
             pb.set_message("Creating hold events...");
             pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
@@ -420,12 +470,7 @@ pub async fn find_availability(
 
     pb.finish_with_message("Created hold events.");
 
-    let s = format_availability(merged);
-    print!("{}", s);
-    let mut ctx = ClipboardContext::new().unwrap();
-    if ctx.set_contents(s).is_ok() {
-        println!("Copied to clipboard.")
-    }
+    print_and_copy_availability(&merged);
 
     Ok(())
 }
