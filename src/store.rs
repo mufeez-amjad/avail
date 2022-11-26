@@ -8,15 +8,29 @@ pub struct Store {
 pub enum Platform {
     Microsoft,
     Google,
+    Unsupported
 }
 
+const OUTLOOK: &str = "Microsoft Outlook";
+const GOOGLE: &str = "Google Calendar";
+
+impl From<&std::string::String> for Platform {
+    fn from(str: &std::string::String) -> Self {
+        match str.as_str() {
+            OUTLOOK => Platform::Microsoft,
+            GOOGLE => Platform::Google,
+            _ => Platform::Unsupported,
+        }
+    }
+}
 pub const PLATFORMS: [Platform; 2] = [Platform::Google, Platform::Microsoft];
 
 impl Platform {
     fn as_str(&self) -> &'static str {
         match self {
-            Platform::Microsoft => "Microsoft Outlook",
-            Platform::Google => "Google Calendar",
+            Platform::Microsoft => OUTLOOK,
+            Platform::Google => GOOGLE,
+            Platform::Unsupported => "Unsupported",
         }
     }
 }
@@ -95,9 +109,8 @@ pub struct CalendarModel {
     pub account_id: Option<u32>,
     pub id: String,
     pub name: String,
-    pub query: bool,
-    pub can_edit: Option<bool>,
-    pub use_for_hold_events: bool,
+    // Used to indicate query and use_for_hold_events.
+    pub selected: bool,
 }
 
 impl CalendarModel {
@@ -108,34 +121,63 @@ impl CalendarModel {
                 cal.account_id.unwrap(),
                 cal.id,
                 cal.name,
-                cal.query,
-                cal.can_edit.unwrap_or(false),
-                cal.use_for_hold_events,
+                cal.selected, // query
+                false,        // can_edit
+                false,        // use_for_hold_events
             ))?;
         }
         Ok(())
     }
 
-    pub fn get_all(conn: &Connection) -> anyhow::Result<Vec<CalendarModel>> {
+    pub fn update_query(
+        conn: &Connection,
+        calendars: Vec<CalendarModel>,
+        value: Vec<bool>,
+    ) -> anyhow::Result<()> {
+        let mut stmt =
+            conn.prepare("UPDATE calendars SET query = ? where account_id = ? and id = ?")?;
+
+        if calendars.len() != value.len() {
+            return Err(anyhow::anyhow!(
+                "calendars and value parameters have different sizes"
+            ));
+        }
+
+        for i in 0..calendars.len() {
+            let cal = calendars.get(i).unwrap();
+            let value = value.get(i).unwrap();
+
+            stmt.execute((value, cal.account_id.unwrap(), cal.id.to_owned()))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn update_hold_event_calendar(conn: &Connection, cal: CalendarModel) -> anyhow::Result<()> {
+        // Set all to false.
+        conn.execute("UPDATE calendars SET use_for_hold_events = false", ())?;
+
         let mut stmt = conn.prepare(
-            "SELECT account_id, id, name, query, can_edit, use_for_hold_events FROM calendars",
+            "UPDATE calendars SET use_for_hold_events = true where account_id = ? and id = ?",
         )?;
+        stmt.execute((cal.account_id.unwrap(), cal.id))?;
+
+        Ok(())
+    }
+
+    pub fn get_all(conn: &Connection) -> anyhow::Result<Vec<CalendarModel>> {
+        let mut stmt = conn.prepare("SELECT account_id, id, name FROM calendars")?;
         let prev_unselected_calendars: Vec<CalendarModel> = stmt
             .query_map((), |row| {
                 let account_id: u32 = row.get(0)?;
                 let id: String = row.get(1)?;
                 let name: String = row.get(2)?;
-                let query: bool = row.get(3)?;
-                let can_edit: bool = row.get(4)?;
-                let use_for_hold_events: bool = row.get(5)?;
 
                 Ok(CalendarModel {
                     account_id: Some(account_id),
                     id,
                     name,
-                    query,
-                    can_edit: Some(can_edit),
-                    use_for_hold_events,
+                    selected: false,
                 })
             })?
             .filter_map(|s| s.ok())
@@ -159,9 +201,7 @@ impl CalendarModel {
                     account_id: Some(*account_id),
                     id: id,
                     name: name,
-                    query: selected,
-                    can_edit: Some(false),
-                    use_for_hold_events: false,
+                    selected: false,
                 })
             })?
             .filter_map(|s| s.ok())
@@ -185,15 +225,53 @@ impl CalendarModel {
                     account_id: Some(*account_id),
                     id: id,
                     name: name,
-                    query: false,
-                    can_edit: Some(can_edit),
-                    use_for_hold_events: false,
+                    selected: false,
                 })
             })?
             .filter_map(|s| s.ok())
             .collect();
 
         Ok(prev_unselected_calendars)
+    }
+
+    pub fn get_hold_event_calendar(
+        conn: &Connection,
+    ) -> anyhow::Result<Option<(String, CalendarModel)>> {
+        let mut stmt =
+            conn.prepare("SELECT c.account_id, c.id, c.name, a.platform FROM calendars c JOIN accounts a on c.account_id = a.id where use_for_hold_events = true;")?;
+        let calendars: Vec<(String, CalendarModel)> = stmt
+            .query_map((), |row| {
+                let account_id: u32 = row.get(0)?;
+                let id: String = row.get(1)?;
+                let name: String = row.get(2)?;
+                let platform: String = row.get(3)?;
+                Ok((
+                    platform,
+                    CalendarModel {
+                        account_id: Some(account_id),
+                        id: id,
+                        name: name,
+                        selected: false,
+                    },
+                ))
+            })?
+            .filter_map(|s| s.ok())
+            .collect();
+
+        let res = calendars.get(0);
+        if let Some((platform, cal)) = res {
+            Ok(Some((
+                platform.to_owned(),
+                CalendarModel {
+                    account_id: cal.account_id,
+                    id: cal.id.to_owned(),
+                    name: cal.name.to_owned(),
+                    selected: false,
+                },
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn delete_for_account(conn: &Connection, account_id: &u32) -> anyhow::Result<()> {

@@ -95,9 +95,7 @@ impl GetResources for MicrosoftGraph {
                 id: c.id,
                 name: c.name,
                 selected: false,
-                can_edit: c.can_edit,
                 account_id: 0,
-                use_for_hold_events: false,
             })
             .collect();
         Ok(calendars)

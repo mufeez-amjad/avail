@@ -4,7 +4,7 @@ use chrono::{prelude::*, Duration};
 use colored::Colorize;
 use copypasta::{ClipboardContext, ClipboardProvider};
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect, Select};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
 use itertools::Itertools;
 use tokio::{sync::Semaphore, task::JoinHandle};
 
@@ -31,10 +31,13 @@ pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
         Platform::Microsoft => {
             let (_, refresh_token) = microsoft::get_authorization_code().await;
             crate::store::store_token(email, &refresh_token)?;
-        }
+        },
         Platform::Google => {
             let (_, refresh_token) = google::get_authorization_code().await;
             crate::store::store_token(email, &refresh_token)?;
+        },
+        _ => {
+            return Err(anyhow::anyhow!("Unsupported platform"))
         }
     }
 
@@ -93,7 +96,7 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
     if accounts.is_empty() {
         return Err(anyhow::anyhow!(format!(
             "You must link accounts using the \"{}\" command before fetching calendars.",
-            "accounts add".bold()
+            "accounts add".italic().bold()
         )));
     }
 
@@ -105,10 +108,13 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
             Platform::Microsoft => {
                 let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
                 microsoft::MicrosoftGraph::get_calendars(&access_token).await?
-            }
+            },
             Platform::Google => {
                 let access_token = google::refresh_access_token(&refresh_token).await;
                 google::GoogleAPI::get_calendars(&access_token).await?
+            },
+            _ => {
+                return Err(anyhow::anyhow!("Unsupported platform"))
             }
         };
 
@@ -147,9 +153,7 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
                 account_id: account.id,
                 id: c.id,
                 name: c.name,
-                query: c.selected,
-                can_edit: Some(c.can_edit),
-                use_for_hold_events: false,
+                selected: c.selected,
             })
             .collect();
 
@@ -165,28 +169,40 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
             account_id: c.account_id.unwrap(),
             id: c.id,
             name: c.name,
-            selected: c.query,
-            can_edit: c.can_edit.unwrap_or(false),
-            use_for_hold_events: c.use_for_hold_events,
+            selected: false,
         })
         .collect_vec();
 
-    let mut previous_selected: usize = 0;
-    for (i, calendar) in all_calendars.iter().enumerate() {
-        if calendar.use_for_hold_events {
-            previous_selected = i;
-            break;
-        }
-    }
+    let previous_selected = db.execute(Box::new(move |conn| {
+        CalendarModel::get_hold_event_calendar(conn)
+    }))??;
+
+    let previous_selected_idx: usize = if let Some((_, cal)) = previous_selected {
+        let e = all_calendars.iter().enumerate().find(|e| e.1.id == cal.id);
+        e.unwrap().0
+    } else {
+        0
+    };
 
     let selected_calendar_idx: usize = Select::with_theme(&ColorfulTheme::default())
         .items(&all_calendars)
-        .default(previous_selected)
+        .default(previous_selected_idx)
         .with_prompt("Which calendar would you like to use to create hold events?")
         .interact()?;
 
     let mut selected_calendar = all_calendars.get_mut(selected_calendar_idx).unwrap();
-    selected_calendar.use_for_hold_events = true;
+    selected_calendar.selected = true;
+
+    let update_calendar = CalendarModel {
+        account_id: Some(selected_calendar.account_id),
+        id: selected_calendar.id.to_owned(),
+        name: selected_calendar.name.to_owned(),
+        selected: true,
+    };
+
+    db.execute(Box::new(move |conn| {
+        CalendarModel::update_hold_event_calendar(conn, update_calendar)
+    }))??;
 
     Ok(())
 }
@@ -201,15 +217,23 @@ pub fn print_and_copy_availability(merged: &Vec<Availability<Local>>) {
 }
 
 pub(crate) async fn find_availability(
-    db: Store,
+    db: &Store,
     finder: AvailabilityFinder,
-    m: ProgressIndicator,
+    m: &ProgressIndicator,
 ) -> anyhow::Result<Vec<Availability<Local>>> {
     let pb = m.add(ProgressBar::new(1));
     pb.set_message("Retrieving events...");
     pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
     let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+
+    if accounts.is_empty() {
+        return Err(anyhow::anyhow!(format!(
+            "You must link accounts using the \"{}\" command and configure calendars using \"{}\" command before you are able to find availabilities.",
+            "accounts add".bold().italic(),
+            "calendars".bold().italic()
+        )));
+    }
 
     // Microsoft Graph has 4 concurrent requests limit
     let semaphore = Arc::new(Semaphore::new(4));
@@ -267,6 +291,9 @@ pub(crate) async fn find_availability(
                         Ok(res)
                     }));
                 }
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Unsupported platform"))
             }
         }
     }
@@ -337,116 +364,73 @@ pub(crate) async fn find_availability(
 
 pub(crate) async fn create_hold_events(
     db: Store,
-    merged: Vec<Availability<Local>>,
+    merged: &Vec<Availability<Local>>,
     m: ProgressIndicator,
 ) -> anyhow::Result<()> {
-    let pb = m.add(ProgressBar::new(1));
-    pb.set_message("Retrieving events...");
-    pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
+    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
 
     let event_title: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("What's the name of your event?")
         .interact_text()?;
 
-    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+    let calendar = db.execute(Box::new(move |conn| {
+        CalendarModel::get_hold_event_calendar(conn)
+    }))??;
 
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Which account would you like to create the events under?")
-        .items(&accounts)
-        .interact()
-        .unwrap();
+    if calendar.is_none() {
+        return Err(anyhow::anyhow!(
+            "No calendar is configured to be used for hold events."
+        ));
+    }
+
+    let pb = m.add(ProgressBar::new(1));
+    pb.set_message("Creating hold events...");
+    pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
+
+    let (platform, cal) = calendar.unwrap();
 
     // Microsoft Graph has 4 concurrent requests limit
     let semaphore = Arc::new(Semaphore::new(4));
     let mut tasks: Vec<JoinHandle<anyhow::Result<()>>> = vec![];
+    
+    let account_name = accounts.iter().find(|a| a.id == cal.account_id).unwrap().name.to_owned();
 
-    match accounts[selection].platform.unwrap() {
+    match Platform::from(&platform) {
         Platform::Microsoft => {
-            let account_id = accounts[selection].id.unwrap().to_owned();
-            let editable_calendars: Vec<Calendar> = db
-                .execute(Box::new(move |conn| {
-                    CalendarModel::get_all_editable(conn, &account_id, true)
-                }))??
-                .into_iter()
-                .map(|c| Calendar {
-                    id: c.id,
-                    name: c.name,
-                    selected: c.query,
-                    can_edit: c.can_edit.unwrap(),
-                    use_for_hold_events: false,
-                    account_id: c.account_id.unwrap(),
-                })
-                .collect_vec();
-
-            let selected_calendar = Select::with_theme(&ColorfulTheme::default())
-                .with_prompt("Which calendar would you like to add the events to?")
-                .items(&editable_calendars)
-                .interact()
-                .unwrap();
-
-            let pb = m.add(ProgressBar::new(1));
-            pb.set_message("Creating hold events...");
-            pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
-
             for avail in merged.iter() {
-                let refresh_token = crate::store::get_token(&accounts[selection].name)?;
+                let refresh_token = crate::store::get_token(&account_name)?;
                 let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
                 let permit = semaphore
                     .clone()
                     .acquire_owned()
                     .await
                     .expect("unable to acquire permit"); // Acquire a permit
-                let calendar_id = editable_calendars[selected_calendar].id.to_owned();
+                let calendar_id = cal.id.to_owned();
                 let title = format!("HOLD - {}", event_title);
                 let start = avail.start.clone();
                 let end = avail.end.clone();
 
                 tasks.push(tokio::task::spawn(async move {
-                    microsoft::MicrosoftGraph::create_event(
+                    let res = microsoft::MicrosoftGraph::create_event(
                         &access_token,
                         &calendar_id,
                         &title,
                         start,
                         end,
                     )
-                    .await?;
+                    .await;
                     drop(permit);
+                    res?;
                     Ok(())
                 }));
             }
         }
         Platform::Google => {
-            let account_id = accounts[selection].id.unwrap().to_owned();
-            let editable_calendars: Vec<Calendar> = db
-                .execute(Box::new(move |conn| {
-                    CalendarModel::get_all_editable(conn, &account_id, true)
-                }))??
-                .into_iter()
-                .map(|c| Calendar {
-                    id: c.id,
-                    name: c.name,
-                    selected: c.query,
-                    can_edit: c.can_edit.unwrap(),
-                    account_id: c.account_id.unwrap(),
-                    use_for_hold_events: false,
-                })
-                .collect_vec();
-
-            let selected_calendar = Select::with_theme(&ColorfulTheme::default())
-                .with_prompt("Which calendar would you like to add the events to?")
-                .items(&editable_calendars)
-                .interact()
-                .unwrap();
-
-            let pb = m.add(ProgressBar::new(1));
-            pb.set_message("Creating hold events...");
-            pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
-
             for avail in merged.iter() {
-                let refresh_token = crate::store::get_token(&accounts[selection].name)?;
+                let refresh_token = crate::store::get_token(&account_name)?;
                 let access_token = google::refresh_access_token(&refresh_token).await;
 
-                let calendar_id = editable_calendars[selected_calendar].id.to_owned();
+                let calendar_id = cal.id.to_owned();
                 let title = format!("HOLD - {}", event_title);
                 let start = avail.start.clone();
                 let end = avail.end.clone();
@@ -463,14 +447,15 @@ pub(crate) async fn create_hold_events(
                     Ok(())
                 }));
             }
+        },
+        _ => {
+            return Err(anyhow::anyhow!("Unsupported platform"))
         }
     }
 
-    futures::future::join_all(tasks).await;
+    let res = futures::future::join_all(tasks).await;
 
     pb.finish_with_message("Created hold events.");
-
-    print_and_copy_availability(&merged);
 
     Ok(())
 }

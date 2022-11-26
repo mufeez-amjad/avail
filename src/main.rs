@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     match &cli.command {
-        Some(cli::Commands::Account(account_cmd)) => match &account_cmd.command {
+        Some(cli::Commands::Accounts(account_cmd)) => match &account_cmd.command {
             cli::AccountCommands::Add(cmd) => commands::add_account(db, &cmd.email).await?,
             cli::AccountCommands::Remove(cmd) => commands::remove_account(db, &cmd.email)?,
             cli::AccountCommands::List(_) => commands::list_accounts(db)?,
@@ -74,11 +74,15 @@ async fn main() -> anyhow::Result<()> {
 
             let progress = ProgressIndicator::default();
 
-            let merged = commands::find_availability(db, finder, progress).await?;
+            let merged = commands::find_availability(&db, finder, &progress).await?;
 
             if !cli.hold_event {
-                commands::print_and_copy_availability(&merged)
+                commands::print_and_copy_availability(&merged);
+                return Ok(());
             }
+
+            commands::create_hold_events(db, &merged, progress).await?;
+            commands::print_and_copy_availability(&merged);
         }
     }
 

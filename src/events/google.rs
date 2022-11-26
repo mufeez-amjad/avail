@@ -100,9 +100,7 @@ impl GetResources for GoogleAPI {
                 id: c.id,
                 name: c.name,
                 selected: false,
-                can_edit: true,
                 account_id: 0,
-                use_for_hold_events: false,
             })
             .collect();
         Ok(calendars)

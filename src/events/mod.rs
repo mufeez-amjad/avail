@@ -9,8 +9,6 @@ pub struct Calendar {
     pub id: String,
     pub name: String,
     pub selected: bool,
-    pub can_edit: bool,
-    pub use_for_hold_events: bool,
 }
 
 impl std::fmt::Display for Calendar {
