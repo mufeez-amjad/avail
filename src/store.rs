@@ -199,32 +199,8 @@ impl CalendarModel {
                 let name: String = row.get(1)?;
                 Ok(CalendarModel {
                     account_id: Some(*account_id),
-                    id: id,
-                    name: name,
-                    selected: false,
-                })
-            })?
-            .filter_map(|s| s.ok())
-            .collect();
-
-        Ok(prev_unselected_calendars)
-    }
-
-    pub fn get_all_editable(
-        conn: &Connection,
-        account_id: &u32,
-        can_edit: bool,
-    ) -> anyhow::Result<Vec<CalendarModel>> {
-        let mut stmt =
-            conn.prepare("SELECT id, name FROM calendars where can_edit = ?1 and account_id = ?2")?;
-        let prev_unselected_calendars: Vec<CalendarModel> = stmt
-            .query_map((can_edit, account_id), |row| {
-                let id: String = row.get(0)?;
-                let name: String = row.get(1)?;
-                Ok(CalendarModel {
-                    account_id: Some(*account_id),
-                    id: id,
-                    name: name,
+                    id,
+                    name,
                     selected: false,
                 })
             })?
@@ -249,8 +225,8 @@ impl CalendarModel {
                     platform,
                     CalendarModel {
                         account_id: Some(account_id),
-                        id: id,
-                        name: name,
+                        id,
+                        name,
                         selected: false,
                     },
                 ))

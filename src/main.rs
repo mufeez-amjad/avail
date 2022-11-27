@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(cli::Commands::Calendars(_)) => commands::refresh_calendars(db).await?,
         _ => {
-            let start_time = cli.start.unwrap_or(util::Round::ceil(&Local::now()));
+            let start_time = cli.start.unwrap_or_else(|| util::Round::ceil(&Local::now()));
 
             let end_time = if let Some(end) = cli.end {
                 end
@@ -52,8 +52,8 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
-            let min_time = cli.min.unwrap_or(NaiveTime::from_hms(9, 0, 0));
-            let max_time = cli.max.unwrap_or(NaiveTime::from_hms(17, 0, 0));
+            let min_time = cli.min.unwrap_or_else(|| NaiveTime::from_hms(9, 0, 0));
+            let max_time = cli.max.unwrap_or_else(|| NaiveTime::from_hms(17, 0, 0));
 
             let duration = cli.duration.unwrap_or_else(|| Duration::minutes(30));
 

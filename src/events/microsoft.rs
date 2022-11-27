@@ -12,6 +12,7 @@ use crate::oauth::microsoft::MicrosoftOauthClient;
 struct GraphCalendar {
     id: String,
     name: String,
+    #[allow(dead_code)]
     can_edit: bool,
 }
 

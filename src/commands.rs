@@ -207,7 +207,7 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn print_and_copy_availability(merged: &Vec<Availability<Local>>) {
+pub fn print_and_copy_availability(merged: &[Availability<Local>]) {
     let s = format_availability(merged);
     let mut ctx = ClipboardContext::new().unwrap();
     print!("{}", s);
@@ -364,7 +364,7 @@ pub(crate) async fn find_availability(
 
 pub(crate) async fn create_hold_events(
     db: Store,
-    merged: &Vec<Availability<Local>>,
+    merged: &[Availability<Local>],
     m: ProgressIndicator,
 ) -> anyhow::Result<()> {
     let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
@@ -407,8 +407,8 @@ pub(crate) async fn create_hold_events(
                     .expect("unable to acquire permit"); // Acquire a permit
                 let calendar_id = cal.id.to_owned();
                 let title = format!("HOLD - {}", event_title);
-                let start = avail.start.clone();
-                let end = avail.end.clone();
+                let start = avail.start;
+                let end = avail.end;
 
                 tasks.push(tokio::task::spawn(async move {
                     let res = microsoft::MicrosoftGraph::create_event(
@@ -432,8 +432,8 @@ pub(crate) async fn create_hold_events(
 
                 let calendar_id = cal.id.to_owned();
                 let title = format!("HOLD - {}", event_title);
-                let start = avail.start.clone();
-                let end = avail.end.clone();
+                let start = avail.start;
+                let end = avail.end;
 
                 tasks.push(tokio::task::spawn(async move {
                     google::GoogleAPI::create_event(

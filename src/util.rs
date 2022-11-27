@@ -70,9 +70,10 @@ pub struct AvailabilityFinder {
 }
 
 fn is_weekend(weekday: Weekday) -> bool {
-    return weekday == Weekday::Sat || weekday == Weekday::Sun;
+    weekday == Weekday::Sat || weekday == Weekday::Sun
 }
 
+#[allow(clippy::type_complexity)]
 impl AvailabilityFinder {
     pub fn get_availability(
         &self,
@@ -272,8 +273,8 @@ where
     res
 }
 
-pub fn format_availability(avails: &Vec<Availability<Local>>) -> String {
-    let avail_days = avails.into_iter().group_by(|e| (e.start.date()));
+pub fn format_availability(avails: &[Availability<Local>]) -> String {
+    let avail_days = avails.iter().group_by(|e| (e.start.date()));
 
     let mut iter = avail_days.into_iter().peekable();
 
@@ -283,12 +284,12 @@ pub fn format_availability(avails: &Vec<Availability<Local>>) -> String {
         let i = iter.next();
         let (day, avails) = i.unwrap();
 
-        let _ = write!(s, "{}\n", day.format("%a %b %d %Y"));
+        let _ = writeln!(s, "{}", day.format("%a %b %d %Y"));
 
         for avail in avails {
-            let _ = write!(
+            let _ = writeln!(
                 s,
-                "- {} to {}\n",
+                "- {} to {}",
                 avail.start.format("%I:%M %p"),
                 avail.end.format("%I:%M %p")
             );
@@ -329,7 +330,7 @@ impl<T: TimeZone> Round for DateTime<T> {
 
         let new_minute = (minute / round_to_minute) * round_to_minute;
 
-        let delta: i64 = (new_minute - minute).into();
+        let delta: i64 = new_minute - minute;
 
         self.clone() + Duration::minutes(delta)
     }
