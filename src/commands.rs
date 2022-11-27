@@ -16,9 +16,10 @@ use crate::datetime::{
     finder::AvailabilityFinder,
 };
 use crate::events::{google, microsoft, Calendar, Event, GetResources};
-use crate::store::{Account, CalendarModel, Model, Platform, Store, PLATFORMS};
+use crate::store::{AccountModel, CalendarModel, Platform, Store, PLATFORMS};
+use crate::util::AvailConfig;
 
-pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
+pub async fn add_account(db: Store, email: &str, cfg: &AvailConfig) -> anyhow::Result<()> {
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Which platform would you like to add an account for?")
         .items(&PLATFORMS[..])
@@ -31,17 +32,17 @@ pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
 
     match selected_platform {
         Platform::Microsoft => {
-            let (_, refresh_token) = microsoft::get_authorization_code().await;
+            let (_, refresh_token) = microsoft::get_authorization_code(cfg).await;
             crate::store::store_token(email, &refresh_token)?;
         }
         Platform::Google => {
-            let (_, refresh_token) = google::get_authorization_code().await;
+            let (_, refresh_token) = google::get_authorization_code(cfg).await;
             crate::store::store_token(email, &refresh_token)?;
         }
         _ => return Err(anyhow::anyhow!("Unsupported platform")),
     }
 
-    let account = Account {
+    let account = AccountModel {
         name: email.to_owned(),
         platform: Some(selected_platform),
         id: None,
@@ -59,7 +60,7 @@ pub fn remove_account(db: Store, email: &str) -> anyhow::Result<()> {
         .unwrap()
     {
         crate::store::delete_token(email)?;
-        let account = Account {
+        let account = AccountModel {
             name: email.to_owned(),
             id: None,
             platform: None,
@@ -72,7 +73,7 @@ pub fn remove_account(db: Store, email: &str) -> anyhow::Result<()> {
 }
 
 pub fn list_accounts(db: Store) -> anyhow::Result<()> {
-    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
 
     if accounts.is_empty() {
         println!("Configured accounts: None");
@@ -90,8 +91,8 @@ pub fn list_accounts(db: Store) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
-    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+pub async fn refresh_calendars(db: Store, cfg: &AvailConfig) -> anyhow::Result<()> {
+    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
 
     if accounts.is_empty() {
         return Err(anyhow::anyhow!(format!(
@@ -106,11 +107,11 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
         let account_id = account.id.unwrap().to_owned();
         let mut calendars = match account.platform.unwrap() {
             Platform::Microsoft => {
-                let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
+                let (access_token, _) = microsoft::refresh_access_token(&cfg, &refresh_token).await;
                 microsoft::MicrosoftGraph::get_calendars(&access_token).await?
             }
             Platform::Google => {
-                let access_token = google::refresh_access_token(&refresh_token).await;
+                let access_token = google::refresh_access_token(&cfg, &refresh_token).await;
                 google::GoogleAPI::get_calendars(&access_token).await?
             }
             _ => return Err(anyhow::anyhow!("Unsupported platform")),
@@ -205,8 +206,8 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn print_and_copy_availability(merged: &[Availability<Local>]) {
-    let s = format_availability(merged);
+pub fn print_and_copy_availability(avails: &[Availability<Local>]) {
+    let s = format_availability(avails);
     let mut ctx = ClipboardContext::new().unwrap();
     print!("{}", s);
     if ctx.set_contents(s).is_ok() {
@@ -216,6 +217,7 @@ pub fn print_and_copy_availability(merged: &[Availability<Local>]) {
 
 pub(crate) async fn find_availability(
     db: &Store,
+    cfg: &AvailConfig,
     finder: AvailabilityFinder,
     m: &ProgressIndicator,
 ) -> anyhow::Result<Vec<Availability<Local>>> {
@@ -223,7 +225,7 @@ pub(crate) async fn find_availability(
     pb.set_message("Retrieving events...");
     pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
-    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
 
     if accounts.is_empty() {
         return Err(anyhow::anyhow!(format!(
@@ -232,6 +234,14 @@ pub(crate) async fn find_availability(
             "calendars".bold().italic()
         )));
     }
+
+    println!(
+        "Finding availability between {} and {}\n",
+        format!("{}", finder.start.format("%b %-d %Y"))
+            .bold()
+            .blue(),
+        format!("{}", finder.end.format("%b %-d %Y")).bold().blue()
+    );
 
     // Microsoft Graph has 4 concurrent requests limit
     let semaphore = Arc::new(Semaphore::new(4));
@@ -250,7 +260,7 @@ pub(crate) async fn find_availability(
         match account.platform.unwrap() {
             Platform::Microsoft => {
                 let refresh_token = crate::store::get_token(&account.name)?;
-                let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
+                let (access_token, _) = microsoft::refresh_access_token(&cfg, &refresh_token).await;
 
                 for cal_id in selected_calendars {
                     let token = access_token.clone();
@@ -274,7 +284,7 @@ pub(crate) async fn find_availability(
             }
             Platform::Google => {
                 let refresh_token = crate::store::get_token(&account.name)?;
-                let access_token = google::refresh_access_token(&refresh_token).await;
+                let access_token = google::refresh_access_token(&cfg, &refresh_token).await;
 
                 for cal_id in selected_calendars {
                     let token = access_token.clone();
@@ -360,10 +370,11 @@ pub(crate) async fn find_availability(
 
 pub(crate) async fn create_hold_events(
     db: Store,
+    cfg: &AvailConfig,
     merged: &[Availability<Local>],
     m: ProgressIndicator,
 ) -> anyhow::Result<()> {
-    let accounts = db.execute(Box::new(|conn| Account::get(conn)))??;
+    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
 
     let event_title: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("What's the name of your event?")
@@ -400,7 +411,7 @@ pub(crate) async fn create_hold_events(
         Platform::Microsoft => {
             for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&account_name)?;
-                let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
+                let (access_token, _) = microsoft::refresh_access_token(&cfg, &refresh_token).await;
                 let permit = semaphore
                     .clone()
                     .acquire_owned()
@@ -429,7 +440,7 @@ pub(crate) async fn create_hold_events(
         Platform::Google => {
             for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&account_name)?;
-                let access_token = google::refresh_access_token(&refresh_token).await;
+                let access_token = google::refresh_access_token(&cfg, &refresh_token).await;
 
                 let calendar_id = cal.id.to_owned();
                 let title = format!("HOLD - {}", event_title);

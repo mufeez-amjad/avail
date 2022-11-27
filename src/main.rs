@@ -11,10 +11,12 @@ use clap::Parser;
 use colored::Colorize;
 
 use crate::{cli::ProgressIndicator, datetime::finder::AvailabilityFinder};
+use util::load_config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
+    let cfg = load_config()?;
 
     let db = store::Store::new(&format!("{}/db.db3", util::get_avail_directory()?));
 
@@ -26,11 +28,11 @@ async fn main() -> anyhow::Result<()> {
 
     match &cli.command {
         Some(cli::Commands::Accounts(account_cmd)) => match &account_cmd.command {
-            cli::AccountCommands::Add(cmd) => commands::add_account(db, &cmd.email).await?,
+            cli::AccountCommands::Add(cmd) => commands::add_account(db, &cmd.email, &cfg).await?,
             cli::AccountCommands::Remove(cmd) => commands::remove_account(db, &cmd.email)?,
             cli::AccountCommands::List(_) => commands::list_accounts(db)?,
         },
-        Some(cli::Commands::Calendars(_)) => commands::refresh_calendars(db).await?,
+        Some(cli::Commands::Calendars(_)) => commands::refresh_calendars(db, &cfg).await?,
         _ => {
             let start_time = cli
                 .start
@@ -61,12 +63,6 @@ async fn main() -> anyhow::Result<()> {
 
             let duration = cli.duration.unwrap_or_else(|| Duration::minutes(30));
 
-            println!(
-                "Finding availability between {} and {}\n",
-                format!("{}", start_time.format("%b %-d %Y")).bold().blue(),
-                format!("{}", end_time.format("%b %-d %Y")).bold().blue()
-            );
-
             let finder = AvailabilityFinder {
                 start: start_time,
                 end: end_time,
@@ -78,14 +74,14 @@ async fn main() -> anyhow::Result<()> {
 
             let progress = ProgressIndicator::default();
 
-            let merged = commands::find_availability(&db, finder, &progress).await?;
+            let merged = commands::find_availability(&db, &cfg, finder, &progress).await?;
 
             if !cli.hold_event {
                 commands::print_and_copy_availability(&merged);
                 return Ok(());
             }
 
-            commands::create_hold_events(db, &merged, progress).await?;
+            commands::create_hold_events(db, &cfg, &merged, progress).await?;
             commands::print_and_copy_availability(&merged);
         }
     }

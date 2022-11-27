@@ -16,12 +16,15 @@ pub struct GoogleOauthClient {
     inner: BasicClient,
 }
 
+const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_URL: &str = "https://www.googleapis.com/oauth2/v3/token";
+const REDIRECT_URL: &str = "http://localhost:3003/redirect";
+
 impl GoogleOauthClient {
-    pub fn new(client_id: &str, client_secret: &str, _auth_url: &str, _token_url: &str) -> Self {
-        let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
-            .expect("Invalid authorization endpoint URL");
-        let token_url = TokenUrl::new("https://www.googleapis.com/oauth2/v3/token".to_string())
-            .expect("Invalid token endpoint URL");
+    pub fn new(client_id: &str, client_secret: &str) -> Self {
+        let auth_url =
+            AuthUrl::new(AUTH_URL.to_string()).expect("Invalid authorization endpoint URL");
+        let token_url = TokenUrl::new(TOKEN_URL.to_string()).expect("Invalid token endpoint URL");
 
         let client = BasicClient::new(
             ClientId::new(client_id.to_string()),
@@ -31,8 +34,7 @@ impl GoogleOauthClient {
         )
         .set_auth_type(AuthType::RequestBody)
         .set_redirect_uri(
-            RedirectUrl::new("http://localhost:3003/redirect".to_string())
-                .expect("Invalid redirect URL"),
+            RedirectUrl::new(REDIRECT_URL.to_string()).expect("Invalid redirect URL"),
         );
 
         Self { inner: client }

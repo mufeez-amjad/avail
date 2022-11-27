@@ -16,15 +16,15 @@ pub struct MicrosoftOauthClient {
     inner: BasicClient,
 }
 
+const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const REDIRECT_URL: &str = "http://localhost:3003/redirect";
+
 impl MicrosoftOauthClient {
-    pub fn new(client_id: &str, client_secret: &str, _auth_url: &str, _token_url: &str) -> Self {
-        let auth_url = AuthUrl::new(
-            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
-        )
-        .expect("Invalid authorization endpoint URL");
-        let token_url =
-            TokenUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string())
-                .expect("Invalid token endpoint URL");
+    pub fn new(client_id: &str, client_secret: &str) -> Self {
+        let auth_url =
+            AuthUrl::new(AUTH_URL.to_string()).expect("Invalid authorization endpoint URL");
+        let token_url = TokenUrl::new(TOKEN_URL.to_string()).expect("Invalid token endpoint URL");
 
         let client = BasicClient::new(
             ClientId::new(client_id.to_string()),
@@ -34,8 +34,7 @@ impl MicrosoftOauthClient {
         )
         .set_auth_type(AuthType::RequestBody)
         .set_redirect_uri(
-            RedirectUrl::new("http://localhost:3003/redirect".to_string())
-                .expect("Invalid redirect URL"),
+            RedirectUrl::new(REDIRECT_URL.to_string()).expect("Invalid redirect URL"),
         );
 
         Self { inner: client }

@@ -41,28 +41,23 @@ impl std::fmt::Display for Platform {
     }
 }
 
-pub trait Model<T> {
-    fn get(conn: &Connection) -> anyhow::Result<Vec<T>>;
-    fn insert(&self, conn: &Connection) -> anyhow::Result<()>;
-    fn delete(&self, conn: &Connection) -> anyhow::Result<()>;
-}
 
-pub struct Account {
+pub struct AccountModel {
     pub id: Option<u32>,
     pub name: String,
     pub platform: Option<Platform>,
 }
 
-impl std::fmt::Display for Account {
+impl std::fmt::Display for AccountModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "- {} on {}", self.name, self.platform.unwrap())
     }
 }
 
-impl Model<Account> for Account {
-    fn get(conn: &Connection) -> anyhow::Result<Vec<Account>> {
+impl AccountModel {
+    pub fn get(conn: &Connection) -> anyhow::Result<Vec<AccountModel>> {
         let mut stmt = conn.prepare("SELECT id, name, platform FROM accounts")?;
-        let accounts: Vec<Account> = stmt
+        let accounts: Vec<AccountModel> = stmt
             .query_map([], |row| {
                 let id: u32 = row.get(0)?;
                 let name: String = row.get(1)?;
@@ -74,7 +69,7 @@ impl Model<Account> for Account {
                     Platform::Google
                 };
 
-                Ok(Account {
+                Ok(AccountModel {
                     id: Some(id),
                     name,
                     platform: Some(platform),
@@ -85,7 +80,9 @@ impl Model<Account> for Account {
         Ok(accounts)
     }
 
-    fn insert(&self, conn: &Connection) -> anyhow::Result<()> {
+    // pub fn get_uncached_calendar()
+
+    pub fn insert(&self, conn: &Connection) -> anyhow::Result<()> {
         conn.execute(
             "INSERT INTO accounts (name, platform) VALUES (?1, ?2)",
             [
@@ -96,7 +93,7 @@ impl Model<Account> for Account {
         Ok(())
     }
 
-    fn delete(&self, conn: &Connection) -> anyhow::Result<()> {
+    pub fn delete(&self, conn: &Connection) -> anyhow::Result<()> {
         conn.execute(
             "DELETE FROM accounts where name = ?",
             [self.name.to_owned()],
