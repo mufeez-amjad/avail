@@ -8,7 +8,7 @@ pub struct Store {
 pub enum Platform {
     Microsoft,
     Google,
-    Unsupported
+    Unsupported,
 }
 
 const OUTLOOK: &str = "Microsoft Outlook";

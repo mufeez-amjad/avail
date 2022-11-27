@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod datetime;
 mod events;
 mod oauth;
 mod store;
@@ -9,12 +10,13 @@ use chrono::{prelude::*, Duration};
 use clap::Parser;
 use colored::Colorize;
 
-use crate::{cli::ProgressIndicator, util::AvailabilityFinder};
+use crate::{cli::ProgressIndicator, datetime::finder::AvailabilityFinder};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
-    let db = store::Store::new("./db.db3");
+
+    let db = store::Store::new(&format!("{}/db.db3", util::get_avail_directory()?));
 
     // Needed to restore cursor if program exits during dialoguer prompt.
     ctrlc::set_handler(move || {
@@ -30,7 +32,9 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(cli::Commands::Calendars(_)) => commands::refresh_calendars(db).await?,
         _ => {
-            let start_time = cli.start.unwrap_or_else(|| util::Round::ceil(&Local::now()));
+            let start_time = cli
+                .start
+                .unwrap_or_else(|| datetime::finder::Round::ceil(&Local::now()));
 
             let end_time = if let Some(end) = cli.end {
                 end

@@ -147,5 +147,6 @@ impl Default for ProgressIndicator {
 
 impl ProgressIndicator {
     pub fn add(&self, p: ProgressBar) -> ProgressBar {
-        self.multi.add(p).with_style(self.style.clone())   }
+        self.multi.add(p).with_style(self.style.clone())
+    }
 }

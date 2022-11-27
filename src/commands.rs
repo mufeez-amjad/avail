@@ -9,12 +9,14 @@ use itertools::Itertools;
 use tokio::{sync::Semaphore, task::JoinHandle};
 
 use crate::cli::ProgressIndicator;
+use crate::datetime::{
+    availability::{
+        format_availability, merge_overlapping_avails, split_availability, Availability,
+    },
+    finder::AvailabilityFinder,
+};
 use crate::events::{google, microsoft, Calendar, Event, GetResources};
 use crate::store::{Account, CalendarModel, Model, Platform, Store, PLATFORMS};
-use crate::util::{
-    format_availability, merge_overlapping_avails, split_availability, Availability,
-    AvailabilityFinder,
-};
 
 pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
     let selection = Select::with_theme(&ColorfulTheme::default())
@@ -31,14 +33,12 @@ pub async fn add_account(db: Store, email: &str) -> anyhow::Result<()> {
         Platform::Microsoft => {
             let (_, refresh_token) = microsoft::get_authorization_code().await;
             crate::store::store_token(email, &refresh_token)?;
-        },
+        }
         Platform::Google => {
             let (_, refresh_token) = google::get_authorization_code().await;
             crate::store::store_token(email, &refresh_token)?;
-        },
-        _ => {
-            return Err(anyhow::anyhow!("Unsupported platform"))
         }
+        _ => return Err(anyhow::anyhow!("Unsupported platform")),
     }
 
     let account = Account {
@@ -108,14 +108,12 @@ pub async fn refresh_calendars(db: Store) -> anyhow::Result<()> {
             Platform::Microsoft => {
                 let (access_token, _) = microsoft::refresh_access_token(&refresh_token).await;
                 microsoft::MicrosoftGraph::get_calendars(&access_token).await?
-            },
+            }
             Platform::Google => {
                 let access_token = google::refresh_access_token(&refresh_token).await;
                 google::GoogleAPI::get_calendars(&access_token).await?
-            },
-            _ => {
-                return Err(anyhow::anyhow!("Unsupported platform"))
             }
+            _ => return Err(anyhow::anyhow!("Unsupported platform")),
         };
 
         let mut prev_unselected_calendars = db
@@ -292,9 +290,7 @@ pub(crate) async fn find_availability(
                     }));
                 }
             }
-            _ => {
-                return Err(anyhow::anyhow!("Unsupported platform"))
-            }
+            _ => return Err(anyhow::anyhow!("Unsupported platform")),
         }
     }
 
@@ -392,8 +388,13 @@ pub(crate) async fn create_hold_events(
     // Microsoft Graph has 4 concurrent requests limit
     let semaphore = Arc::new(Semaphore::new(4));
     let mut tasks: Vec<JoinHandle<anyhow::Result<()>>> = vec![];
-    
-    let account_name = accounts.iter().find(|a| a.id == cal.account_id).unwrap().name.to_owned();
+
+    let account_name = accounts
+        .iter()
+        .find(|a| a.id == cal.account_id)
+        .unwrap()
+        .name
+        .to_owned();
 
     match Platform::from(&platform) {
         Platform::Microsoft => {
@@ -447,10 +448,8 @@ pub(crate) async fn create_hold_events(
                     Ok(())
                 }));
             }
-        },
-        _ => {
-            return Err(anyhow::anyhow!("Unsupported platform"))
         }
+        _ => return Err(anyhow::anyhow!("Unsupported platform")),
     }
 
     let res = futures::future::join_all(tasks).await;
