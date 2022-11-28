@@ -69,6 +69,8 @@ impl MicrosoftOauthClient {
 
         // A very naive implementation of the redirect server.
         let listener = TcpListener::bind("127.0.0.1:3003").unwrap();
+        // TODO: ctrlc should terminate TcpConnection
+
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
                 let code;

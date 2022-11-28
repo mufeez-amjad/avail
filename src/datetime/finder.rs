@@ -405,7 +405,7 @@ mod tests {
 
         assert_eq!(avails.len(), 1);
         let day_avails = &avails.get(0).unwrap().1;
-        assert_eq!(day_avails.len(), 3);
+        assert_eq!(day_avails.len(), 4);
 
         assert_eq!(
             *day_avails.get(0).unwrap(),
@@ -426,6 +426,13 @@ mod tests {
             Availability {
                 start: create_local_datetime("10-05-2022 14:30"),
                 end: create_local_datetime("10-05-2022 15:30"),
+            }
+        );
+        assert_eq!(
+            *day_avails.get(3).unwrap(),
+            Availability {
+                start: create_local_datetime("10-05-2022 16:30"),
+                end: create_local_datetime("10-05-2022 17:00"),
             }
         );
     }
