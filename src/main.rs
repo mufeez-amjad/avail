@@ -6,9 +6,12 @@ mod oauth;
 mod store;
 mod util;
 
+use std::{process::exit, sync::Mutex};
+
 use chrono::{prelude::*, Duration};
 use clap::Parser;
 use colored::Colorize;
+use tokio::sync::oneshot;
 
 use crate::{cli::ProgressIndicator, datetime::finder::AvailabilityFinder};
 use util::load_config;
@@ -20,15 +23,26 @@ async fn main() -> anyhow::Result<()> {
 
     let db = store::Store::new(&format!("{}/db.db3", util::get_avail_directory()?));
 
-    // Needed to restore cursor if program exits during dialoguer prompt.
+    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+    let tx_mutex: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(Some(shutdown_sender));
+
     ctrlc::set_handler(move || {
+        // Signal to TcpListener to shutdown.
+        if let Some(tx) = tx_mutex.lock().unwrap().take() {
+            tx.send(()).unwrap();
+        }
+
+        // Needed to restore cursor if program exits during dialoguer prompt.
         let term = console::Term::stdout();
         let _ = term.show_cursor();
+        exit(130); // 130 is the exit code for Ctrl-c
     })?;
 
     match &cli.command {
         Some(cli::Commands::Accounts(account_cmd)) => match &account_cmd.command {
-            cli::AccountCommands::Add(cmd) => commands::add_account(db, &cmd.email, &cfg).await?,
+            cli::AccountCommands::Add(cmd) => {
+                commands::add_account(db, &cmd.email, &cfg, shutdown_receiver).await?
+            }
             cli::AccountCommands::Remove(cmd) => commands::remove_account(db, &cmd.email)?,
             cli::AccountCommands::List(_) => commands::list_accounts(db)?,
         },
@@ -76,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
             let merged = commands::find_availability(&db, &cfg, finder, &progress).await?;
 
-            if !cli.hold_event {
+            if !cli.create_hold_event {
                 commands::print_and_copy_availability(&merged);
                 return Ok(());
             }

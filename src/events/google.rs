@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json;
 
 use super::{Calendar, Event, GetResources};
-use crate::{oauth::google::GoogleOauthClient, util::AvailConfig};
+use crate::{oauth::google, util::AvailConfig};
 
 #[derive(serde::Deserialize, Clone)]
 struct GoogleCalendar {
@@ -53,13 +53,16 @@ struct GoogleError {
     message: String,
 }
 
-pub async fn get_authorization_code(cfg: &AvailConfig) -> (String, String) {
-    let client = GoogleOauthClient::new(&cfg.google.client_id, &cfg.google.client_secret);
-    client.get_authorization_code().await
+pub async fn get_authorization_code(
+    cfg: &AvailConfig,
+    shutdown_receiver: tokio::sync::oneshot::Receiver<()>,
+) -> (String, String) {
+    let client = google::new_client(&cfg.google.client_id, &cfg.google.client_secret);
+    client.get_authorization_code(shutdown_receiver).await
 }
 
-pub async fn refresh_access_token(cfg: &AvailConfig, refresh_token: &str) -> String {
-    let client = GoogleOauthClient::new(&cfg.google.client_id, &cfg.google.client_secret);
+pub async fn refresh_access_token(cfg: &AvailConfig, refresh_token: &str) -> (String, String) {
+    let client = google::new_client(&cfg.google.client_id, &cfg.google.client_secret);
     client.refresh_access_token(refresh_token.to_owned()).await
 }
 

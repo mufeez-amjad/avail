@@ -9,11 +9,11 @@ use regex::Regex;
 #[command(propagate_version = true)]
 pub(crate) struct Cli {
     /// Start of search window in the form of MM/DD/YYYY (default now)
-    #[arg(short, long, value_parser = parse_datetime)]
+    #[arg(long, value_parser = parse_datetime)]
     pub start: Option<DateTime<Local>>,
 
     /// End of search window in the form of MM/DD/YYYY (default start + 7 days)
-    #[arg(short, long, value_parser = parse_datetime)]
+    #[arg(long, value_parser = parse_datetime)]
     pub end: Option<DateTime<Local>>,
 
     /// Minimum time for availability in the form of <int>:<int>am/pm (default 9:00am)
@@ -32,13 +32,13 @@ pub(crate) struct Cli {
     #[arg(long, default_value_t = false)]
     pub include_weekends: bool,
 
-    /// Duration of availability window, specify with <int>(w|d|h|m) (default 1w)
+    /// Duration of availability window, specify with <int>(w|d|h|m) (default 30m)
     #[arg(short, long, value_parser = parse_duration)]
     pub duration: Option<Duration>,
 
     /// Create a hold event (default false)
-    #[arg(long, default_value_t = false)]
-    pub hold_event: bool,
+    #[arg(short, long, default_value_t = false)]
+    pub create_hold_event: bool,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -49,12 +49,8 @@ fn parse_datetime(arg: &str) -> Result<DateTime<Local>, chrono::ParseError> {
     let non_local_d = NaiveDate::parse_from_str(&dt_str, "%m/%d/%Y");
     let time = NaiveTime::from_hms(0, 0, 0);
 
-    if let Ok(date) = non_local_d {
-        let datetime = NaiveDateTime::new(date, time);
-        Ok(Local.from_local_datetime(&datetime).unwrap())
-    } else {
-        Err(non_local_d.err().unwrap())
-    }
+    let datetime = NaiveDateTime::new(non_local_d?, time);
+    Ok(Local.from_local_datetime(&datetime).unwrap())
 }
 
 fn parse_naivetime(arg: &str) -> Result<NaiveTime, chrono::ParseError> {

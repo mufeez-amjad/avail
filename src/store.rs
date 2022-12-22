@@ -41,7 +41,6 @@ impl std::fmt::Display for Platform {
     }
 }
 
-
 pub struct AccountModel {
     pub id: Option<u32>,
     pub name: String,

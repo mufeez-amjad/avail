@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json;
 
 use super::{Calendar, Event, GetResources};
-use crate::{oauth::microsoft::MicrosoftOauthClient, util::AvailConfig};
+use crate::{oauth::microsoft, util::AvailConfig};
 
 #[derive(serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -59,13 +59,16 @@ struct GraphError {
     message: String,
 }
 
-pub async fn get_authorization_code(cfg: &AvailConfig) -> (String, String) {
-    let client = MicrosoftOauthClient::new(&cfg.microsoft.client_id, &cfg.microsoft.client_secret);
-    client.get_authorization_code().await
+pub async fn get_authorization_code(
+    cfg: &AvailConfig,
+    shutdown_receiver: tokio::sync::oneshot::Receiver<()>,
+) -> (String, String) {
+    let client = microsoft::new_client(&cfg.microsoft.client_id, &cfg.microsoft.client_secret);
+    client.get_authorization_code(shutdown_receiver).await
 }
 
 pub async fn refresh_access_token(cfg: &AvailConfig, refresh_token: &str) -> (String, String) {
-    let client = MicrosoftOauthClient::new(&cfg.microsoft.client_id, &cfg.microsoft.client_secret);
+    let client = microsoft::new_client(&cfg.microsoft.client_id, &cfg.microsoft.client_secret);
     client.refresh_access_token(refresh_token.to_owned()).await
 }
 

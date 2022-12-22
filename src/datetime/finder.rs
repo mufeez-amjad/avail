@@ -154,11 +154,9 @@ impl AvailabilityFinder {
                     // Whole day
                     let end = curr + (self.max - start.time());
 
-                    if start.time() >= self.max || end - start < self.duration {
-                        break;
+                    if start.time() <= self.max && end - start >= self.duration {
+                        avail.push((curr.date(), vec![Availability { start, end }]));
                     }
-
-                    avail.push((curr.date(), vec![Availability { start, end }]));
 
                     // min next day
                     curr = (curr + Duration::days(1)).date().and_hms(
