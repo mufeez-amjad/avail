@@ -5,12 +5,13 @@ avail is a CLI tool that helps you find available times between all your calenda
 
 ### Features:
 
-- Search for availabilities based on:
-  - duration (e.g. one hour)
+- Search for availabilities:
+  - with a specific duration (e.g. one hour)
   - within a search window (e.g. between start and end date, or 1 week out)
   - during specific hours of the day (e.g. 12pm onwards)
-- create hold events so you don't double book yourself
-- copies formatted availability to system clipboard
+  - across any number of calendars associated with a Google or Microsoft account
+- Create hold events so you don't double book yourself
+- Copies formatted availability to system clipboard
 
 ## Installation
 To install avail, run the following command:
