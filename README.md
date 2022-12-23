@@ -42,19 +42,19 @@ Options:
 ```
 
 ## Examples
-To find 30 minute blocks of availability between 9:00am and 5:00pm from now until one week from now, run the following command:
+Find 30 minute blocks of availability between 9:00am and 5:00pm from now until one week from now:
 
 ```
 avail
 ```
 
-To find 1 hour blocks of availability between 10:00am and 4:00pm from 01/01/2022 until 01/31/2022, run the following command:
+Find 1 hour blocks of availability between 10:00am and 4:00pm from 01/01/2022 until 01/31/2022:
 
 ```bash
 avail --start 01/01/2022 --end 01/31/2022 --min 10:00am --max 4:00pm --duration 1h
 ```
 
-To find 2 hour blocks of availability between 9:00am and 5:00pm including weekends from now until 2 weeks from now, run the following command:
+Find 2 hour blocks of availability between 9:00am and 5:00pm including weekends from now until 2 weeks from now:
 
 ```bash
 avail --window 2w --include-weekends --duration 2h
@@ -64,4 +64,4 @@ avail --window 2w --include-weekends --duration 2h
 We welcome contributions to avail! Please follow our contributing guidelines before opening a pull request.
 
 ## License
-avail is licensed under the MIT License.
+avail is licensed under the [MIT License](./LICENSE.md).
