@@ -31,8 +31,6 @@ pub async fn add_account(
         .interact()
         .unwrap();
 
-    // TODO: get client id, secrets
-
     let selected_platform = PLATFORMS[selection];
 
     match selected_platform {
@@ -227,10 +225,6 @@ pub(crate) async fn find_availability(
     finder: AvailabilityFinder,
     m: &ProgressIndicator,
 ) -> anyhow::Result<Vec<Availability<Local>>> {
-    let pb = m.add(ProgressBar::new(1));
-    pb.set_message("Retrieving events...");
-    pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
-
     let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
 
     if accounts.is_empty() {
@@ -248,6 +242,10 @@ pub(crate) async fn find_availability(
             .blue(),
         format!("{}", finder.end.format("%b %-d %Y")).bold().blue()
     );
+
+    let pb = m.add(ProgressBar::new(1));
+    pb.set_message("Retrieving events...");
+    pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
     // Microsoft Graph has 4 concurrent requests limit
     let semaphore = Arc::new(Semaphore::new(4));
@@ -317,12 +315,18 @@ pub(crate) async fn find_availability(
         .flat_map(Result::unwrap)
         .collect();
 
+    pb.finish_with_message("Retrieved events.");
+
     pb.set_message("Computing availabilities...");
 
     let availability = finder.get_availability(events)?;
     let slots: Vec<Availability<Local>> = availability.into_iter().flat_map(|(_d, a)| a).collect();
 
     pb.finish_with_message("Computed availabilities.");
+
+    if slots.is_empty() {
+        return Ok(vec![]);
+    }
 
     // TODO: add multi-level multiselect
     // Right arrow goes into a time window (can select granular windows)
@@ -367,7 +371,7 @@ pub(crate) async fn find_availability(
     }
 
     if selected.is_empty() {
-        return Ok(vec![]);
+        return Err(anyhow::anyhow!("No availabilities selected."));
     }
 
     let merged = merge_overlapping_avails(selected);

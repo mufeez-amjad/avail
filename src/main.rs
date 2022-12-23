@@ -88,15 +88,20 @@ async fn main() -> anyhow::Result<()> {
 
             let progress = ProgressIndicator::default();
 
-            let merged = commands::find_availability(&db, &cfg, finder, &progress).await?;
+            let avails = commands::find_availability(&db, &cfg, finder, &progress).await?;
 
-            if !cli.create_hold_event {
-                commands::print_and_copy_availability(&merged);
+            if avails.is_empty() {
+                println!("No availability found.");
                 return Ok(());
             }
 
-            commands::create_hold_events(db, &cfg, &merged, progress).await?;
-            commands::print_and_copy_availability(&merged);
+            if !cli.create_hold_event {
+                commands::print_and_copy_availability(&avails);
+                return Ok(());
+            }
+
+            commands::create_hold_events(db, &cfg, &avails, progress).await?;
+            commands::print_and_copy_availability(&avails);
         }
     }
 
