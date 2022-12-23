@@ -333,7 +333,7 @@ pub(crate) async fn find_availability(
 
     // TODO: add multi-level multiselect
     // Right arrow goes into a time window (can select granular windows)
-    // Left arrow goes back to root
+    // Left arrow goes back to parent
     // Needs to work with paging
     let selection = MultiSelect::with_theme(&ColorfulTheme::default())
         .with_prompt("Select time window(s)")

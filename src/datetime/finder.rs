@@ -179,33 +179,36 @@ pub trait Round {
 
 impl<T: TimeZone> Round for DateTime<T> {
     fn ceil(&self) -> Self {
-        let round_to_minute = 30;
-
+        let time = self.date().and_hms(self.hour(), self.minute(), 0);
         let minute = self.minute();
 
+        let round_to_minute = 30;
+
         if minute % round_to_minute == 0 {
-            return self.clone();
+            return time;
         }
 
         let new_minute = (minute / round_to_minute + 1) * round_to_minute;
 
-        self.clone() + Duration::minutes((new_minute - minute).into())
+        time + Duration::minutes((new_minute - minute).into())
     }
 
     fn floor(&self) -> Self {
+        let time = self.date().and_hms(self.hour(), self.minute(), 0);
+
         let round_to_minute: i64 = 30;
 
         let minute: i64 = self.minute().into();
 
         if minute % round_to_minute == 0 {
-            return self.clone();
+            return time;
         }
 
         let new_minute = (minute / round_to_minute) * round_to_minute;
 
         let delta: i64 = new_minute - minute;
 
-        self.clone() + Duration::minutes(delta)
+        time + Duration::minutes(delta)
     }
 }
 
@@ -235,6 +238,10 @@ mod tests {
         // Next day
         let dt = create_local_datetime("10-05-2022 23:42");
         assert_eq!(create_local_datetime("10-06-2022 00:00"), dt.ceil());
+
+        // Should disregard seconds
+        let dt = create_local_datetime("10-05-2022 00:02") + Duration::seconds(30);
+        assert_eq!(create_local_datetime("10-05-2022 00:30"), dt.ceil());
     }
 
     #[test]
@@ -245,8 +252,12 @@ mod tests {
         let dt2 = create_local_datetime("10-05-2022 00:02");
         assert_eq!(dt, dt2.floor());
 
-        let dt = create_local_datetime("10-05-2022 00:42");
-        assert_eq!(create_local_datetime("10-05-2022 00:30"), dt.floor());
+        let dt3 = create_local_datetime("10-05-2022 00:42");
+        assert_eq!(create_local_datetime("10-05-2022 00:30"), dt3.floor());
+
+        // Should disregard seconds
+        let dt4 = create_local_datetime("10-05-2022 00:02") + Duration::seconds(30);
+        assert_eq!(dt, dt4.floor());
     }
 
     fn create_event(start: &str, end: &str) -> Event {
