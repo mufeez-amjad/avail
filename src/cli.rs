@@ -134,7 +134,7 @@ impl Default for ProgressIndicator {
     fn default() -> Self {
         ProgressIndicator {
             multi: MultiProgress::new(),
-            style: ProgressStyle::with_template(&"{spinner} {wide_msg}".blue())
+            style: ProgressStyle::with_template(&"{spinner:.green} {wide_msg}")
                 .unwrap()
                 .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈✔"),
         }

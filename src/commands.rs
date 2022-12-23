@@ -28,6 +28,7 @@ pub async fn add_account(
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Which platform would you like to add an account for?")
         .items(&PLATFORMS[..])
+        .default(0)
         .interact()
         .unwrap();
 
@@ -317,7 +318,9 @@ pub(crate) async fn find_availability(
 
     pb.finish_with_message("Retrieved events.");
 
+    let pb = m.add(ProgressBar::new(1));
     pb.set_message("Computing availabilities...");
+    pb.enable_steady_tick(Duration::milliseconds(250).to_std().unwrap());
 
     let availability = finder.get_availability(events)?;
     let slots: Vec<Availability<Local>> = availability.into_iter().flat_map(|(_d, a)| a).collect();
