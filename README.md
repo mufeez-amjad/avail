@@ -1,14 +1,16 @@
 # avail
 avail is a CLI tool that helps you find available times between all your calendars.
 
-You can search for availabilities based on:
-- duration (e.g. one hour)
-- within a search window (e.g. from start to end OR 1 week out)
-- during specific hours of the day (e.g. 12pm onwards)
-
-avail also lets you create hold events so you don't double book yourself.
-
 ![demo.gif](./assets/demo.gif)
+
+### Features:
+
+- Search for availabilities based on:
+  - duration (e.g. one hour)
+  - within a search window (e.g. between start and end date, or 1 week out)
+  - during specific hours of the day (e.g. 12pm onwards)
+- create hold events so you don't double book yourself
+- copies formatted availability to system clipboard
 
 ## Installation
 To install avail, run the following command:
