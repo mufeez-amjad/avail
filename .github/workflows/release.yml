@@ -10,38 +10,28 @@ env:
   REPO_NAME: mufeez-amjad/avail
 
 jobs:
-  dist:
-    name: Dist
+  build:
+    name: Build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
       matrix:
-        build: [aarch64-linux, aarch64-macos] # x86_64-linux, aarch64-linux, x86_64-macos, x86_64-windows, aarch64-macos
+        build: [x86_64-linux, x86_64-darwin, x86_64-windows]
         include:
-        # - build: x86_64-linux
-        #   os: ubuntu-20.04
-        #   rust: stable
-        #   target: x86_64-unknown-linux-gnu
-        #   cross: false
-        - build: aarch64-linux
-          os: ubuntu-20.04
+        - build: x86_64-linux
+          os: ubuntu-latest
           rust: stable
-          target: aarch64-unknown-linux-gnu
+          target: x86_64-unknown-linux-gnu
           cross: false
-        # - build: x86_64-macos
-        #   os: macos-latest
-        #   rust: stable
-        #   target: x86_64-apple-darwin
-        #   cross: false
-        # - build: x86_64-windows
-        #   os: windows-2019
-        #   rust: stable
-        #   target: x86_64-pc-windows-msvc
-        #   cross: false
-        - build: aarch64-macos
+        - build: x86_64-darwin
           os: macos-latest
           rust: stable
-          target: aarch64-apple-darwin
+          target: x86_64-apple-darwin
+          cross: false
+        - build: x86_64-windows
+          os: windows-latest
+          rust: stable
+          target: x86_64-pc-windows-msvc
           cross: false
 
     steps:
@@ -58,12 +48,24 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
-      - name: Run cargo test
+      # - name: Run cargo test
+      #   uses: actions-rs/cargo@v1
+      #   with:
+      #     use-cross: ${{ matrix.cross }}
+      #     command: test
+      #     args: --release --locked --target ${{ matrix.target }}
+
+      - name: Install ARM target
+        if: matrix.os == 'macos-latest'
+        run: rustup update && rustup target add aarch64-apple-darwin
+
+      - name: ARM Build
+        if: matrix.os == 'macos-latest'
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.cross }}
-          command: test
-          args: --release --locked --target ${{ matrix.target }}
+          command: build
+          args: --release --locked --target aarch64-apple-darwin
 
       - name: Build release binary
         uses: actions-rs/cargo@v1
@@ -73,7 +75,7 @@ jobs:
           args: --release --locked --target ${{ matrix.target }}
 
       - name: Strip release binary (linux and macos)
-        if: matrix.build == 'x86_64-linux' || matrix.build == 'x86_64-macos'
+        if: matrix.build == 'x86_64-linux' || matrix.build == 'x86_64-darwin'
         run: strip "target/${{ matrix.target }}/release/$BIN_NAME"
 
       - name: Strip release binary (arm)
@@ -89,8 +91,14 @@ jobs:
         shell: bash
         run: |
           mkdir dist
-          if [ "${{ matrix.os }}" = "windows-2019" ]; then
+          # windows binary is named $BIN_NAME.exe
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp "target/${{ matrix.target }}/release/$BIN_NAME.exe" "dist/"
+          # macos binary is named $BIN_NAME and $BIN_NAME-aarch64
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/"
+            cp "target/aarch64-apple-darwin/release/$BIN_NAME" "dist/$BIN_NAME-aarch64"
+          # linux binary is named $BIN_NAME
           else
             cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/"
           fi
@@ -102,7 +110,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: [dist]
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -119,7 +127,7 @@ jobs:
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
             name=${GITHUB_REF:10}
           fi
-          echo ::set-output name=val::$name
+          echo val=$name >> $GITHUB_OUTPUT
           echo TAG=$name >> $GITHUB_ENV
         id: tagname
 
@@ -133,22 +141,44 @@ jobs:
           mkdir dist
 
           for dir in bins-* ; do
-              platform=${dir#"bins-"}
-              unset exe
+            # e.g. "bins-x86_64-linux"
+            arch=$(echo $dir | cut -d'-' -f2)
+            platform=$(echo $dir | cut -d'-' -f3)
+
+            unset exe
+            if [[ $platform =~ "windows" || $platform =~ "linux" ]]; then
               if [[ $platform =~ "windows" ]]; then
-                  exe=".exe"
+                exe=".exe"
               fi
-              pkgname=$PROJECT_NAME-$TAG-$platform
+
+              pkgname=$PROJECT_NAME-$arch-$platform
+
               mkdir tmp/$pkgname
-              # cp LICENSE README.md tmp/$pkgname
-              mv bins-$platform/$BIN_NAME$exe tmp/$pkgname
+              mv $dir/$BIN_NAME$exe tmp/$pkgname
+
               chmod +x tmp/$pkgname/$BIN_NAME$exe
 
-              if [ "$exe" = "" ]; then
-                  tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
+              if [ "$platform" =~ "windows" ]; then
+                (cd tmp && 7z a -r ../dist/$pkgname.zip $pkgname)
               else
-                  (cd tmp && 7z a -r ../dist/$pkgname.zip $pkgname)
+                tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
               fi
+            elif [[ $platform =~ "darwin" ]]; then
+              pkgname=$PROJECT_NAME-$arch-$platform
+              mkdir tmp/$pkgname
+              mv $dir/$BIN_NAME tmp/$pkgname
+              chmod +x tmp/$pkgname/$BIN_NAME
+              tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
+
+              pkgname=$PROJECT_NAME-aarch64-$platform
+              mkdir tmp/$pkgname
+              mv $dir/$BIN_NAME-aarch64 tmp/$pkgname/$BIN_NAME
+              chmod +x tmp/$pkgname/$BIN_NAME
+              tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
+            else
+              echo "Unknown platform $platform"
+              exit 1
+            fi
           done
 
       - name: Upload binaries to release
@@ -163,4 +193,4 @@ jobs:
       - name: Extract version
         id: extract-version
         run: |
-          printf "::set-output name=%s::%s\n" tag-name "${GITHUB_REF#refs/tags/}"
+          printf "%s=%s\n" tag-name "${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
