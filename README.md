@@ -1,5 +1,5 @@
 # avail
-avail is a CLI tool that helps you find available times between all your calendars.
+avail is a cli tool that helps you find available times between all your calendars.
 
 ![demo.gif](./assets/demo.gif)
 

@@ -158,7 +158,7 @@ jobs:
 
               chmod +x tmp/$pkgname/$BIN_NAME$exe
 
-              if [ "$platform" =~ "windows" ]; then
+              if [[ $platform =~ "windows" ]]; then
                 (cd tmp && 7z a -r ../dist/$pkgname.zip $pkgname)
               else
                 tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
