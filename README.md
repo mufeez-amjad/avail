@@ -1,7 +1,7 @@
 # avail
 avail is a cli tool that helps you find available times between all your calendars.
 
-![demo.gif](./assets/demo.gif)
+<img src="https://github.com/mufeez-amjad/avail/raw/master/assets/demo.gif" width="750" height="auto">
 
 ### Features:
 
