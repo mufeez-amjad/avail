@@ -1,6 +1,5 @@
 use chrono::{prelude::*, Duration};
 use clap::{Args, Parser, Subcommand};
-use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use regex::Regex;
 
@@ -134,7 +133,7 @@ impl Default for ProgressIndicator {
     fn default() -> Self {
         ProgressIndicator {
             multi: MultiProgress::new(),
-            style: ProgressStyle::with_template(&"{spinner:.green} {wide_msg}")
+            style: ProgressStyle::with_template("{spinner:.green} {wide_msg}")
                 .unwrap()
                 .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈✔"),
         }

@@ -4,7 +4,7 @@ pub struct Store {
     connection: Connection,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Microsoft,
     Google,
@@ -122,30 +122,6 @@ impl CalendarModel {
                 false,        // use_for_hold_events
             ))?;
         }
-        Ok(())
-    }
-
-    pub fn update_query(
-        conn: &Connection,
-        calendars: Vec<CalendarModel>,
-        value: Vec<bool>,
-    ) -> anyhow::Result<()> {
-        let mut stmt =
-            conn.prepare("UPDATE calendars SET query = ? where account_id = ? and id = ?")?;
-
-        if calendars.len() != value.len() {
-            return Err(anyhow::anyhow!(
-                "calendars and value parameters have different sizes"
-            ));
-        }
-
-        for i in 0..calendars.len() {
-            let cal = calendars.get(i).unwrap();
-            let value = value.get(i).unwrap();
-
-            stmt.execute((value, cal.account_id.unwrap(), cal.id.to_owned()))?;
-        }
-
         Ok(())
     }
 

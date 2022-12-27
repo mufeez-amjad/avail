@@ -19,16 +19,31 @@ pub fn get_avail_directory() -> anyhow::Result<String> {
     Ok(avail_dir)
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthConfig {
     pub client_id: String,
     pub client_secret: String,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+impl OAuthConfig {
+    pub fn is_unconfigured(&self) -> bool {
+        self.client_id.is_empty() || self.client_secret.is_empty()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AvailConfig {
-    pub google: OAuthConfig,
-    pub microsoft: OAuthConfig,
+    pub google: Option<OAuthConfig>,
+    pub microsoft: Option<OAuthConfig>,
+}
+
+impl Default for AvailConfig {
+    fn default() -> Self {
+        AvailConfig {
+            google: Some(OAuthConfig::default()),
+            microsoft: Some(OAuthConfig::default()),
+        }
+    }
 }
 
 pub fn load_config() -> anyhow::Result<AvailConfig> {
@@ -36,8 +51,14 @@ pub fn load_config() -> anyhow::Result<AvailConfig> {
     let config_path = Path::new(&str_path);
     if config_path.exists() {
         let cfg: AvailConfig = toml::from_str(&fs::read_to_string(config_path)?)?;
-        if (cfg.google.client_id.is_empty() || cfg.google.client_secret.is_empty())
-            && (cfg.microsoft.client_id.is_empty() || cfg.microsoft.client_secret.is_empty())
+
+        // Ensure that at least one of google, microsoft are configured
+        if cfg.google.to_owned().unwrap_or_default().is_unconfigured()
+            && cfg
+                .microsoft
+                .to_owned()
+                .unwrap_or_default()
+                .is_unconfigured()
         {
             return Err(anyhow::anyhow!(format!(
                 "Please ensure {} is configured correctly",

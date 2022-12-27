@@ -37,10 +37,10 @@ impl AvailabilityFinder {
             .start
             .date()
             .and_hms(self.min.hour(), self.min.minute(), 0);
-        if curr.minute() % 15 != 0 {
-            curr += Duration::minutes((curr.minute() % 15) as i64);
-        }
-        curr = DateTime::max(self.start, curr);
+
+        // Set curr to be max of now and curr.
+        curr = DateTime::max(curr, self.start);
+        curr = curr.ceil();
 
         while curr < self.end {
             let day = iter.next();
@@ -48,12 +48,26 @@ impl AvailabilityFinder {
             // Have another day of events to process
             if let Some((date, events)) = day {
                 // Add days that are entirely free
-                while curr.date() < date && curr.time() < self.max {
-                    // Whole day till max
-                    let end = curr.date().and_hms(self.max.hour(), self.max.minute(), 0);
+                //
+                // If curr.date < date and curr.time < max, then we advance to the start of the next day
+                while curr.date() < date {
+                    if curr.time() < self.max {
+                        // Whole day till max
+                        let end = curr.date().and_hms(self.max.hour(), self.max.minute(), 0);
 
-                    if self.include_weekends || !is_weekend(curr.weekday()) {
-                        avail.push((curr.date(), vec![Availability { start: curr, end }]));
+                        if self.include_weekends || !is_weekend(curr.weekday()) {
+                            avail.push((
+                                curr.date(),
+                                vec![Availability {
+                                    start: curr.date().and_hms(
+                                        self.min.hour(),
+                                        self.max.minute(),
+                                        0,
+                                    ),
+                                    end,
+                                }],
+                            ));
+                        }
                     }
 
                     // min next day

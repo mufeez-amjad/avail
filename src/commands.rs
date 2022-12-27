@@ -34,14 +34,29 @@ pub async fn add_account(
 
     let selected_platform = PLATFORMS[selection];
 
+    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
+    if accounts
+        .iter()
+        .any(|a| a.name == email && a.platform.unwrap() == selected_platform)
+    {
+        return Err(anyhow::anyhow!("Account already exists with that email"));
+    }
+
     match selected_platform {
         Platform::Microsoft => {
-            let (_, refresh_token) =
-                microsoft::get_authorization_code(cfg, shutdown_receiver).await;
+            let (_, refresh_token) = microsoft::get_authorization_code(
+                &cfg.microsoft.to_owned().unwrap_or_default(),
+                shutdown_receiver,
+            )
+            .await?;
             crate::store::store_token(email, &refresh_token)?;
         }
         Platform::Google => {
-            let (_, refresh_token) = google::get_authorization_code(cfg, shutdown_receiver).await;
+            let (_, refresh_token) = google::get_authorization_code(
+                &cfg.google.to_owned().unwrap_or_default(),
+                shutdown_receiver,
+            )
+            .await?;
             crate::store::store_token(email, &refresh_token)?;
         }
         _ => return Err(anyhow::anyhow!("Unsupported platform")),
@@ -112,11 +127,19 @@ pub async fn refresh_calendars(db: Store, cfg: &AvailConfig) -> anyhow::Result<(
         let account_id = account.id.unwrap().to_owned();
         let mut calendars = match account.platform.unwrap() {
             Platform::Microsoft => {
-                let (access_token, _) = microsoft::refresh_access_token(cfg, &refresh_token).await;
+                let (access_token, _) = microsoft::refresh_access_token(
+                    &cfg.microsoft.to_owned().unwrap_or_default(),
+                    &refresh_token,
+                )
+                .await?;
                 microsoft::MicrosoftGraph::get_calendars(&access_token).await?
             }
             Platform::Google => {
-                let (access_token, _) = google::refresh_access_token(cfg, &refresh_token).await;
+                let (access_token, _) = google::refresh_access_token(
+                    &cfg.google.to_owned().unwrap_or_default(),
+                    &refresh_token,
+                )
+                .await?;
                 google::GoogleAPI::get_calendars(&access_token).await?
             }
             _ => return Err(anyhow::anyhow!("Unsupported platform")),
@@ -265,7 +288,11 @@ pub(crate) async fn find_availability(
         match account.platform.unwrap() {
             Platform::Microsoft => {
                 let refresh_token = crate::store::get_token(&account.name)?;
-                let (access_token, _) = microsoft::refresh_access_token(cfg, &refresh_token).await;
+                let (access_token, _) = microsoft::refresh_access_token(
+                    &cfg.microsoft.to_owned().unwrap_or_default(),
+                    &refresh_token,
+                )
+                .await?;
 
                 for cal_id in selected_calendars {
                     let token = access_token.clone();
@@ -289,7 +316,11 @@ pub(crate) async fn find_availability(
             }
             Platform::Google => {
                 let refresh_token = crate::store::get_token(&account.name)?;
-                let (access_token, _) = google::refresh_access_token(cfg, &refresh_token).await;
+                let (access_token, _) = google::refresh_access_token(
+                    &cfg.google.to_owned().unwrap_or_default(),
+                    &refresh_token,
+                )
+                .await?;
 
                 for cal_id in selected_calendars {
                     let token = access_token.clone();
@@ -424,7 +455,11 @@ pub(crate) async fn create_hold_events(
         Platform::Microsoft => {
             for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&account_name)?;
-                let (access_token, _) = microsoft::refresh_access_token(cfg, &refresh_token).await;
+                let (access_token, _) = microsoft::refresh_access_token(
+                    &cfg.microsoft.to_owned().unwrap_or_default(),
+                    &refresh_token,
+                )
+                .await?;
                 let permit = semaphore
                     .clone()
                     .acquire_owned()
@@ -453,7 +488,11 @@ pub(crate) async fn create_hold_events(
         Platform::Google => {
             for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&account_name)?;
-                let (access_token, _) = google::refresh_access_token(cfg, &refresh_token).await;
+                let (access_token, _) = google::refresh_access_token(
+                    &cfg.google.to_owned().unwrap_or_default(),
+                    &refresh_token,
+                )
+                .await?;
 
                 let calendar_id = cal.id.to_owned();
                 let title = format!("HOLD - {}", event_title);
@@ -477,6 +516,9 @@ pub(crate) async fn create_hold_events(
     }
 
     let res = futures::future::join_all(tasks).await;
+    if res.iter().any(|r| r.is_err()) {
+        return Err(anyhow::anyhow!("Failed to create hold events."));
+    }
 
     pb.finish_with_message("Created hold events.");
 

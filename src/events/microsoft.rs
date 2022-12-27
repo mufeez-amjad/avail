@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json;
 
 use super::{Calendar, Event, GetResources};
-use crate::{oauth::microsoft, util::AvailConfig};
+use crate::{oauth::microsoft, util::OAuthConfig};
 
 #[derive(serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -60,16 +60,25 @@ struct GraphError {
 }
 
 pub async fn get_authorization_code(
-    cfg: &AvailConfig,
+    cfg: &OAuthConfig,
     shutdown_receiver: tokio::sync::oneshot::Receiver<()>,
-) -> (String, String) {
-    let client = microsoft::new_client(&cfg.microsoft.client_id, &cfg.microsoft.client_secret);
-    client.get_authorization_code(shutdown_receiver).await
+) -> anyhow::Result<(String, String)> {
+    if cfg.is_unconfigured() {
+        return Err(anyhow::anyhow!("Microsoft OAuth is not configured. Please set the client_id and client_secret in the config file."));
+    }
+    let client = microsoft::new_client(&cfg.client_id, &cfg.client_secret);
+    Ok(client.get_authorization_code(shutdown_receiver).await)
 }
 
-pub async fn refresh_access_token(cfg: &AvailConfig, refresh_token: &str) -> (String, String) {
-    let client = microsoft::new_client(&cfg.microsoft.client_id, &cfg.microsoft.client_secret);
-    client.refresh_access_token(refresh_token.to_owned()).await
+pub async fn refresh_access_token(
+    cfg: &OAuthConfig,
+    refresh_token: &str,
+) -> anyhow::Result<(String, String)> {
+    if cfg.is_unconfigured() {
+        return Err(anyhow::anyhow!("Microsoft OAuth is not configured. Please set the client_id and client_secret in the config file."));
+    }
+    let client = microsoft::new_client(&cfg.client_id, &cfg.client_secret);
+    Ok(client.refresh_access_token(refresh_token.to_owned()).await)
 }
 
 pub struct MicrosoftGraph {}

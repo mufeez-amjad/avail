@@ -97,6 +97,8 @@ impl OauthClient {
         let (authorize_url, _csrf_state, pkce_code_verifier) = self.get_authorization_url();
 
         let authorize_url_with_offline = format!("{}&access_type=offline", authorize_url);
+        println!("Opening browser to {}", authorize_url_with_offline);
+
         webbrowser::open(authorize_url_with_offline.as_str()).expect("failed to open web browser");
 
         // A very naive implementation of the redirect server.
