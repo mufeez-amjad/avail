@@ -14,13 +14,15 @@ avail is a cli tool that helps you find available times between all your calenda
 - Copies formatted availability to system clipboard
 
 ## Installation
-To install avail, run the following command:
+The easiest way to install `avail` is by running the following command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mufeez-amjad/avail/install.sh | sh -
 ```
 
-You'll then need to retrieve OAuth credentials for Microsoft Outlook, Google Calendar, or both. Follow the instructions [here]().
+Alternatively, you can install `avail` by [building from source](https://github.com/mufeez-amjad/avail/wiki/Getting-Started#from-source) or [installing a pre-built binary](https://github.com/mufeez-amjad/avail/wiki/Getting-Started#pre-built-binary). 
+
+After installing, you will then need to retrieve OAuth credentials for Microsoft Outlook, Google Calendar, or both. Instructions can be found [here](https://github.com/mufeez-amjad/avail/wiki/Getting-Started#setting-up-oauth).
 
 ## Usage
 ```
@@ -44,6 +46,8 @@ Options:
   -V, --version              Print version information
 ```
 
+More information on the commands is available in the [wiki](https://github.com/mufeez-amjad/avail/wiki/Commands#avail).
+
 ## Examples
 Find 30 minute blocks of availability between 9:00am and 5:00pm from now until one week from now:
 
@@ -64,7 +68,7 @@ avail --window 2w --include-weekends --duration 2h
 ```
 
 ## Contributing
-We welcome contributions to avail! Please follow our contributing guidelines before opening a pull request.
+Feel free to open a PR!
 
 ## License
 avail is licensed under the [MIT License](./LICENSE.md).
