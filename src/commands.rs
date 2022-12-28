@@ -34,7 +34,7 @@ pub async fn add_account(
 
     let selected_platform = PLATFORMS[selection];
 
-    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
+    let accounts = db.execute(Box::new(AccountModel::get))??;
     if accounts
         .iter()
         .any(|a| a.name == email && a.platform.unwrap() == selected_platform)
@@ -97,7 +97,7 @@ pub fn remove_account(db: Store, email: &str) -> anyhow::Result<()> {
 }
 
 pub fn list_accounts(db: Store) -> anyhow::Result<()> {
-    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
+    let accounts = db.execute(Box::new(AccountModel::get))??;
 
     if accounts.is_empty() {
         println!("Configured accounts: None");
@@ -116,7 +116,7 @@ pub fn list_accounts(db: Store) -> anyhow::Result<()> {
 }
 
 pub async fn refresh_calendars(db: Store, cfg: &AvailConfig) -> anyhow::Result<()> {
-    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
+    let accounts = db.execute(Box::new(AccountModel::get))??;
 
     if accounts.is_empty() {
         return Err(anyhow::anyhow!(format!(
@@ -194,7 +194,7 @@ pub async fn refresh_calendars(db: Store, cfg: &AvailConfig) -> anyhow::Result<(
     }
 
     let mut all_calendars: Vec<Calendar> = db
-        .execute(Box::new(move |conn| CalendarModel::get_all(conn)))??
+        .execute(Box::new(CalendarModel::get_all))??
         .into_iter()
         .map(|c| Calendar {
             account_id: c.account_id.unwrap(),
@@ -253,7 +253,7 @@ pub(crate) async fn find_availability(
     finder: AvailabilityFinder,
     m: &ProgressIndicator,
 ) -> anyhow::Result<Vec<Availability<Local>>> {
-    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
+    let accounts = db.execute(Box::new(AccountModel::get))??;
 
     if accounts.is_empty() {
         return Err(anyhow::anyhow!(format!(
@@ -422,7 +422,7 @@ pub(crate) async fn create_hold_events(
     merged: &[Availability<Local>],
     m: &ProgressIndicator,
 ) -> anyhow::Result<()> {
-    let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
+    let accounts = db.execute(Box::new(AccountModel::get))??;
 
     let event_title: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("What's the name of your event?")

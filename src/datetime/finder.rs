@@ -163,8 +163,7 @@ impl AvailabilityFinder {
                 while curr.date() < self.end.date()
                     || (curr.date() == self.end.date() && curr < self.end)
                 {
-                    let is_weekend = is_weekend(curr.weekday());
-                    if !is_weekend || (is_weekend && self.include_weekends) {
+                    if !is_weekend(curr.weekday()) || self.include_weekends {
                         let start = curr.ceil();
 
                         // Whole day
