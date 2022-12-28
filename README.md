@@ -1,9 +1,10 @@
-# avail
+# avail [![CI](https://github.com/mufeez-amjad/avail/actions/workflows/build.yml/badge.svg)](https://github.com/mufeez-amjad/avail/actions/workflows/build.yml)
+
 avail is a cli tool that helps you find available times between all your calendars.
 
 <img src="https://github.com/mufeez-amjad/avail/raw/master/assets/demo.gif" width="750" height="auto">
 
-### Features:
+### Features
 
 - Search for availabilities:
   - with a specific duration (e.g. one hour)
