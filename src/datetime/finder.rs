@@ -163,13 +163,16 @@ impl AvailabilityFinder {
                 while curr.date() < self.end.date()
                     || (curr.date() == self.end.date() && curr < self.end)
                 {
-                    let start = curr.ceil();
+                    let is_weekend = is_weekend(curr.weekday());
+                    if !is_weekend || (is_weekend && self.include_weekends) {
+                        let start = curr.ceil();
 
-                    // Whole day
-                    let end = curr + (self.max - start.time());
+                        // Whole day
+                        let end = curr + (self.max - start.time());
 
-                    if start.time() <= self.max && end - start >= self.duration {
-                        avail.push((curr.date(), vec![Availability { start, end }]));
+                        if start.time() <= self.max && end - start >= self.duration {
+                            avail.push((curr.date(), vec![Availability { start, end }]));
+                        }
                     }
 
                     // min next day
