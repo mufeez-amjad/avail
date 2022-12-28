@@ -111,7 +111,7 @@ pub(crate) enum AccountCommands {
 
 #[derive(Args)]
 pub(crate) struct AccountAdd {
-    /// The email of the account
+    /// The email of the account to add
     pub email: String,
 }
 

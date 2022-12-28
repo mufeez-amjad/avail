@@ -73,7 +73,7 @@ pub async fn get_authorization_code(
 pub async fn refresh_access_token(
     cfg: &OAuthConfig,
     refresh_token: &str,
-) -> anyhow::Result<(String, String)> {
+) -> anyhow::Result<String> {
     if cfg.is_unconfigured() {
         return Err(anyhow::anyhow!("Microsoft OAuth is not configured. Please set the client_id and client_secret in the config file."));
     }

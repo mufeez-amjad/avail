@@ -58,7 +58,7 @@ pub async fn get_authorization_code(
     shutdown_receiver: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<(String, String)> {
     if cfg.is_unconfigured() {
-        return Err(anyhow::anyhow!("Microsoft OAuth is not configured. Please set the client_id and client_secret in the config file."));
+        return Err(anyhow::anyhow!("Google OAuth is not configured. Please set the client_id and client_secret in the config file."));
     }
     let client = google::new_client(&cfg.client_id, &cfg.client_secret);
     Ok(client.get_authorization_code(shutdown_receiver).await)
@@ -67,7 +67,7 @@ pub async fn get_authorization_code(
 pub async fn refresh_access_token(
     cfg: &OAuthConfig,
     refresh_token: &str,
-) -> anyhow::Result<(String, String)> {
+) -> anyhow::Result<String> {
     let client = google::new_client(&cfg.client_id, &cfg.client_secret);
     Ok(client.refresh_access_token(refresh_token.to_owned()).await)
 }

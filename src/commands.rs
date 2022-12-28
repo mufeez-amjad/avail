@@ -68,7 +68,11 @@ pub async fn add_account(
         id: None,
     };
     db.execute(Box::new(move |conn| account.insert(conn)))??;
-    println!("Successfully added account.");
+    println!("\nSuccessfully added account.");
+    println!(
+        "Run the \"{}\" command to update the calendars cache with this account's calendars.",
+        "calendars".bold()
+    );
 
     Ok(())
 }
@@ -127,7 +131,7 @@ pub async fn refresh_calendars(db: Store, cfg: &AvailConfig) -> anyhow::Result<(
         let account_id = account.id.unwrap().to_owned();
         let mut calendars = match account.platform.unwrap() {
             Platform::Microsoft => {
-                let (access_token, _) = microsoft::refresh_access_token(
+                let access_token = microsoft::refresh_access_token(
                     &cfg.microsoft.to_owned().unwrap_or_default(),
                     &refresh_token,
                 )
@@ -135,7 +139,7 @@ pub async fn refresh_calendars(db: Store, cfg: &AvailConfig) -> anyhow::Result<(
                 microsoft::MicrosoftGraph::get_calendars(&access_token).await?
             }
             Platform::Google => {
-                let (access_token, _) = google::refresh_access_token(
+                let access_token = google::refresh_access_token(
                     &cfg.google.to_owned().unwrap_or_default(),
                     &refresh_token,
                 )
@@ -288,7 +292,7 @@ pub(crate) async fn find_availability(
         match account.platform.unwrap() {
             Platform::Microsoft => {
                 let refresh_token = crate::store::get_token(&account.name)?;
-                let (access_token, _) = microsoft::refresh_access_token(
+                let access_token = microsoft::refresh_access_token(
                     &cfg.microsoft.to_owned().unwrap_or_default(),
                     &refresh_token,
                 )
@@ -316,7 +320,7 @@ pub(crate) async fn find_availability(
             }
             Platform::Google => {
                 let refresh_token = crate::store::get_token(&account.name)?;
-                let (access_token, _) = google::refresh_access_token(
+                let access_token = google::refresh_access_token(
                     &cfg.google.to_owned().unwrap_or_default(),
                     &refresh_token,
                 )
@@ -455,7 +459,7 @@ pub(crate) async fn create_hold_events(
         Platform::Microsoft => {
             for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&account_name)?;
-                let (access_token, _) = microsoft::refresh_access_token(
+                let access_token = microsoft::refresh_access_token(
                     &cfg.microsoft.to_owned().unwrap_or_default(),
                     &refresh_token,
                 )
@@ -488,7 +492,7 @@ pub(crate) async fn create_hold_events(
         Platform::Google => {
             for avail in merged.iter() {
                 let refresh_token = crate::store::get_token(&account_name)?;
-                let (access_token, _) = google::refresh_access_token(
+                let access_token = google::refresh_access_token(
                     &cfg.google.to_owned().unwrap_or_default(),
                     &refresh_token,
                 )

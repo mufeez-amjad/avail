@@ -75,7 +75,7 @@ impl OauthClient {
         (authorize_url, csrf_state, pkce_code_verifier)
     }
 
-    pub async fn refresh_access_token(&self, refresh_token: String) -> (String, String) {
+    pub async fn refresh_access_token(&self, refresh_token: String) -> String {
         let token = self
             .inner
             .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
@@ -84,10 +84,7 @@ impl OauthClient {
 
         let inner = token.unwrap();
 
-        (
-            inner.access_token().secret().to_owned(),
-            inner.refresh_token().unwrap().secret().to_owned(),
-        )
+        inner.access_token().secret().to_owned()
     }
 
     pub async fn get_authorization_code(
