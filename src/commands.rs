@@ -420,7 +420,7 @@ pub(crate) async fn create_hold_events(
     db: Store,
     cfg: &AvailConfig,
     merged: &[Availability<Local>],
-    m: ProgressIndicator,
+    m: &ProgressIndicator,
 ) -> anyhow::Result<()> {
     let accounts = db.execute(Box::new(|conn| AccountModel::get(conn)))??;
 

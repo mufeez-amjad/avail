@@ -90,6 +90,8 @@ async fn main() -> anyhow::Result<()> {
 
             let avails = commands::find_availability(&db, &cfg, finder, &progress).await?;
 
+            progress.clear();
+
             if avails.is_empty() {
                 println!("No availability found.");
                 return Ok(());
@@ -100,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            commands::create_hold_events(db, &cfg, &avails, progress).await?;
+            commands::create_hold_events(db, &cfg, &avails, &progress).await?;
             commands::print_and_copy_availability(&avails);
         }
     }
