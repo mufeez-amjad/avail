@@ -57,6 +57,10 @@ main() {
 
     unset exe
 
+    if [ ! -d "$BIN_DIR" ]; then
+        mkdir -p "$BIN_DIR"
+    fi
+
     echo "Downloading latest binary from $BINARY_URL to $BIN_DIR"
     if [[ "$PLATFORM" == "windows" ]]; then
         ensure curl -L "$BINARY_URL" -o "$BIN_DIR/avail.zip"
@@ -64,7 +68,7 @@ main() {
         rm "$BIN_DIR/avail.zip"
         exe = ".exe"
     else
-        ensure curl -L "$BINARY_URL" | tar -xJ -C "$BIN_DIR"
+        ensure curl -L "$BINARY_URL" | tar -xJ -C "$BIN_DIR" --strip-components 1
     fi
 
     if [ ! -f "$BIN_DIR/avail$exe" ]; then
